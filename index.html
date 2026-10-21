@@ -813,6 +813,7 @@
 
   <script>
     const WHATSAPP_PHONE = "5016034507";
+    const USE_GOOGLE_SHEET = false; // live site: keep false — banners & stock edited in hub Website / Inventory tabs
     const SHEET_ID = "1iRBV2T9-iuewq0eYHFYBtfid07VifL73zM2-jpXIR7w";
     const TAB_IN_STOCK = "In Stock";
     const TAB_URL = "URL";
@@ -1309,10 +1310,21 @@
 
     window.addEventListener('DOMContentLoaded', () => {
       startTicker();
+      // Prefer saved banners from localStorage / hub Website tab
+      try {
+        const saved = localStorage.getItem('losBookiesBanners');
+        if (saved) {
+          const b = JSON.parse(saved);
+          if (b.hero1 && b.hero1.length) hero1List = b.hero1;
+          if (b.hero2 && b.hero2.length) hero2List = b.hero2;
+        }
+      } catch (e) {}
       renderHero1();
       renderHero2Strip();
       renderShelves();
-      loadGoogleSheetData();
+      if (typeof USE_GOOGLE_SHEET !== 'undefined' && USE_GOOGLE_SHEET) {
+        loadGoogleSheetData();
+      }
     });
   </script>
 
@@ -1340,6 +1352,7 @@
             <button type="button" onclick="switchTab('orders')" id="hdrNavOrders" class="hdr-nav-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-slate-700 whitespace-nowrap">Buying <span id="snapInTransit" class="ml-0.5 inline-flex items-center justify-center min-w-[1.15rem] h-4 px-1 rounded-full bg-slate-600 text-white text-[10px] font-bold">0</span></button>
             <button type="button" onclick="switchTab('owl')" id="hdrNavOwl" class="hdr-nav-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-slate-700 whitespace-nowrap">OWL</button>
             <button type="button" onclick="switchTab('training')" id="hdrNavTraining" class="hdr-nav-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-slate-700 whitespace-nowrap">Training</button>
+            <button type="button" onclick="switchTab('website')" id="hdrNavWebsite" class="hdr-nav-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-slate-700 whitespace-nowrap">Website</button>
             <button type="button" onclick="switchTab('library')" id="hdrNavLibrary" class="hdr-nav-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-slate-700 whitespace-nowrap">Library</button>
           </nav>
           <div class="flex items-center gap-1.5 shrink-0">
@@ -2897,7 +2910,7 @@
             </div>
             <div class="flex flex-wrap items-center gap-2 text-xs">
               <select id="ccLinkOrderSelect" class="text-xs border border-emerald-300 rounded-xl px-2.5 py-1.5 bg-white font-medium max-w-xs">
-                <option value="">Link to Amazon Order…</option>
+                <option value="">Link to vendor order…</option>
               </select>
               <button onclick="linkSelectedChargesToOrder()" class="bg-emerald-800 hover:bg-emerald-900 text-white px-3.5 py-1.5 rounded-xl font-semibold">Link Selected</button>
               <button onclick="markSelectedCcOther()" class="bg-stone-700 text-white px-3.5 py-1.5 rounded-xl font-semibold">Mark as Other</button>
@@ -2976,9 +2989,14 @@
                       <td class="py-1.5 px-2 text-right text-stone-400">—</td>
                     </tr>
                     <tr>
-                      <td class="py-1.5 px-2 font-sans">Sales (excl. GST)</td>
+                      <td class="py-1.5 px-2 font-sans">Book Sales <span class="text-[9px] text-stone-400 font-normal">(excl. GST)</span></td>
                       <td class="py-1.5 px-2 text-right text-stone-400">—</td>
                       <td class="py-1.5 px-2 text-right" id="posTillSalesEx">BZ$0.00</td>
+                    </tr>
+                    <tr>
+                      <td class="py-1.5 px-2 font-sans">Other Sales <span class="text-[9px] text-stone-400 font-normal">(services, excl. GST)</span></td>
+                      <td class="py-1.5 px-2 text-right text-stone-400">—</td>
+                      <td class="py-1.5 px-2 text-right" id="posTillServiceSalesEx">BZ$0.00</td>
                     </tr>
                     <tr>
                       <td class="py-1.5 px-2 font-sans">GST Payable</td>
@@ -3090,32 +3108,36 @@
                 </div>
                 <p id="posZeroPayHint" class="text-[10px] text-emerald-800 hidden">Deposit covers the full price — complete sale with any method.</p>
 
-                <div>
-                  <label class="text-[10px] font-bold text-stone-500">Payment method</label>
-                  <select id="posPayMethod" onchange="onPosPayMethodChange()" class="w-full p-2 border border-slate-300 rounded-xl text-xs bg-white">
-                    <option value="Cash">Cash</option>
-                    <option value="ABL">ABL (bank transfer)</option>
-                    <option value="BBL">BBL (bank transfer)</option>
-                    <option value="Card">Card</option>
-                    <option value="Credit">On Account (AR)</option>
-                  </select>
-                  <p class="text-[10px] text-slate-500 mt-1 leading-snug"><strong>Cash</strong> = till drawer · <strong>ABL / BBL</strong> = customer paid into that bank · same for reporting, different bank account.</p>
-                </div>
-                <div id="posTenderWrap" class="space-y-1.5">
-                  <label class="text-[10px] font-bold text-stone-500">Amount received (optional)</label>
-                  <div class="relative">
-                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500 font-mono text-xs font-bold">BZ$</span>
-                    <input type="number" min="0" step="0.01" id="posAmountTendered" oninput="recalcPosChange()"
-                      class="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-xl text-xs font-mono font-bold bg-white"
-                      placeholder="Leave blank = exact amount due">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label class="text-[10px] font-bold text-stone-500">Payment method</label>
+                    <select id="posPayMethod" onchange="onPosPayMethodChange()" class="w-full p-2 border border-slate-300 rounded-xl text-xs bg-white">
+                      <option value="Cash">Cash</option>
+                      <option value="ABL">ABL (bank transfer)</option>
+                      <option value="BBL">BBL (bank transfer)</option>
+                      <option value="Card">Card</option>
+                      <option value="Credit">On Account (AR)</option>
+                    </select>
                   </div>
-                  <div class="flex justify-between text-xs">
-                    <span class="text-stone-500">Change due:</span>
-                    <span id="posChangeDisplay" class="font-mono font-bold text-emerald-800">BZ$0.00</span>
+                  <div id="posTenderWrap">
+                    <label class="text-[10px] font-bold text-stone-500">Amount received (optional)</label>
+                    <div class="relative">
+                      <span class="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500 font-mono text-xs font-bold">BZ$</span>
+                      <input type="number" min="0" step="0.01" id="posAmountTendered" oninput="recalcPosChange()"
+                        class="w-full pl-10 pr-3 py-2 border border-slate-300 rounded-xl text-xs font-mono font-bold bg-white"
+                        placeholder="Leave blank = exact amount due">
+                    </div>
                   </div>
                 </div>
-                <button onclick="processPosCheckoutFromForm()" class="w-full bg-indigo-700 hover:bg-indigo-800 text-white font-bold py-2.5 rounded-xl text-xs">Complete sale</button>
-                <button type="button" onclick="openRefundModal()" class="w-full mt-1.5 bg-white border border-rose-300 text-rose-800 hover:bg-rose-50 font-semibold py-2 rounded-xl text-xs">Refund / return</button>
+                <p class="text-[10px] text-slate-500 leading-snug"><strong>Cash</strong> = till drawer · <strong>ABL / BBL</strong> = customer paid into that bank · same for reporting, different bank account.</p>
+                <div class="flex justify-between text-xs">
+                  <span class="text-stone-500">Change due:</span>
+                  <span id="posChangeDisplay" class="font-mono font-bold text-emerald-800">BZ$0.00</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <button onclick="processPosCheckoutFromForm()" class="w-full bg-indigo-700 hover:bg-indigo-800 text-white font-bold py-2.5 rounded-xl text-xs">Complete sale</button>
+                  <button type="button" onclick="openRefundModal()" class="w-full bg-white border border-rose-300 text-rose-800 hover:bg-rose-50 font-semibold py-2.5 rounded-xl text-xs">Refund / return</button>
+                </div>
               </div>
 
             </div>
@@ -3132,9 +3154,26 @@
           <div class="flex items-center justify-between gap-2 flex-wrap">
             <div>
               <div class="font-bold text-sm text-slate-900">Monthly summary (GL-style)</div>
-              <p class="text-[11px] text-slate-500">Accounts as rows · months as columns (incl. Cash / ABL / BBL). Click a month header for detail.</p>
+              <p class="text-[11px] text-slate-500">Accounts as rows · months as columns. Click any amount to see the transactions behind it.</p>
             </div>
-            <button type="button" onclick="renderMonthlyGlSummary()" class="text-[11px] font-semibold text-indigo-700 hover:underline">Refresh</button>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button type="button" id="glRangeThisMonth" onclick="setGlDateRange('this')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-600 text-white">This month</button>
+              <button type="button" id="glRange3m" onclick="setGlDateRange('3m')" class="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white border border-slate-300 text-slate-700 hover:border-indigo-500">Last 3 months</button>
+              <button type="button" id="glRangeAll" onclick="setGlDateRange('all')" class="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white border border-slate-300 text-slate-700 hover:border-indigo-500">All</button>
+              <button type="button" id="glRangeCustom" onclick="setGlDateRange('custom')" class="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white border border-slate-300 text-slate-700 hover:border-indigo-500">Custom</button>
+              <button type="button" onclick="openManualJournalModal()" class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-700 text-white hover:bg-amber-800"><i class="fa-solid fa-book mr-1"></i>Journal entry</button>
+            </div>
+          </div>
+          <div id="glCustomDateWrap" class="hidden flex flex-wrap items-end gap-2 text-xs">
+            <div>
+              <label class="text-[10px] font-semibold text-slate-500">From</label>
+              <input type="date" id="glCustomFrom" class="block p-1.5 border border-slate-300 rounded-lg">
+            </div>
+            <div>
+              <label class="text-[10px] font-semibold text-slate-500">To</label>
+              <input type="date" id="glCustomTo" class="block p-1.5 border border-slate-300 rounded-lg">
+            </div>
+            <button type="button" onclick="applyGlCustomRange()" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-semibold text-[11px]">Apply</button>
           </div>
           <div class="overflow-x-auto border border-slate-200 rounded-xl">
             <table class="w-full text-left text-[11px]" id="monthlyGlTable">
@@ -3171,6 +3210,9 @@
           </div>
           <div class="flex items-center gap-2 flex-wrap">
             <input type="text" id="invSearchInput" oninput="renderInventoryTab()" placeholder="Search title or service…" class="text-xs px-3 py-2 border border-slate-300 rounded-xl min-w-[160px]">
+            <button type="button" onclick="openImportStockModal()" class="text-xs font-semibold bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-2 rounded-xl">
+              <i class="fa-solid fa-file-import mr-1"></i> Import stock
+            </button>
             <button type="button" onclick="openAddInventoryBookModal()" class="text-xs font-semibold bg-indigo-700 hover:bg-indigo-800 text-white px-3 py-2 rounded-xl">
               <i class="fa-solid fa-plus mr-1"></i> Add Book
             </button>
@@ -3292,25 +3334,6 @@
         </div>
       </div>
 
-      <!-- MODAL: Customer receipt -->
-      <div id="receiptModal" class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 hidden">
-        <div class="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
-          <div class="bg-slate-900 p-4 text-white flex items-center justify-between sticky top-0 z-10">
-            <div>
-              <h3 class="font-bold text-base">Customer receipt</h3>
-              <p class="text-xs text-slate-300">Print, email, or WhatsApp</p>
-            </div>
-            <button type="button" onclick="closeModal('receiptModal')" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
-          </div>
-          <div class="p-5" id="receiptSlipBody"></div>
-          <div class="px-5 pb-5 grid grid-cols-3 gap-2">
-            <button type="button" onclick="printCurrentReceipt()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 rounded-xl text-[11px]"><i class="fa-solid fa-print mr-1"></i>Print</button>
-            <button type="button" onclick="emailCurrentReceipt()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-[11px]"><i class="fa-solid fa-envelope mr-1"></i>Email</button>
-            <button type="button" onclick="whatsappCurrentReceipt()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-[11px]"><i class="fa-brands fa-whatsapp mr-1"></i>WhatsApp</button>
-          </div>
-        </div>
-      </div>
-
       <!-- MODAL: Refund / return -->
       <div id="refundModal" class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 hidden">
         <div class="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
@@ -3361,6 +3384,85 @@
             </div>
             <p class="text-[10px] text-slate-500" id="refundHint">Partial refunds allowed. GST is backed out proportionally from the refund amount.</p>
             <button type="button" onclick="confirmRefund()" class="w-full bg-rose-700 hover:bg-rose-800 text-white font-bold py-2.5 rounded-xl">Complete refund</button>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- MODAL: Manual journal / correction entry -->
+      <div id="manualJournalModal" class="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
+          <div class="bg-amber-800 p-4 text-white flex items-center justify-between sticky top-0 z-10">
+            <div>
+              <h3 class="font-bold text-base">Journal entry / correction</h3>
+              <p class="text-xs text-amber-100">Fix deposits to wrong bank, cash-to-bank, or other QBO corrections</p>
+            </div>
+            <button type="button" onclick="closeModal('manualJournalModal')" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="p-5 space-y-3 text-xs">
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block font-semibold mb-1">Date</label>
+                <input type="date" id="mjDate" class="w-full p-2 border border-slate-300 rounded-xl">
+              </div>
+              <div>
+                <label class="block font-semibold mb-1">Template</label>
+                <select id="mjTemplate" onchange="applyMjTemplate()" class="w-full p-2 border border-slate-300 rounded-xl bg-white">
+                  <option value="">Custom lines…</option>
+                  <option value="cash_to_abl">Cash drawer → ABL (bank deposit)</option>
+                  <option value="cash_to_bbl">Cash drawer → BBL (bank deposit)</option>
+                  <option value="abl_to_bbl">ABL → BBL (wrong account)</option>
+                  <option value="bbl_to_abl">BBL → ABL (wrong account)</option>
+                  <option value="dep_abl_to_bbl">Deposit was ABL, should be BBL</option>
+                  <option value="dep_bbl_to_abl">Deposit was BBL, should be ABL</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label class="block font-semibold mb-1">Memo / reason</label>
+              <input type="text" id="mjMemo" class="w-full p-2 border border-slate-300 rounded-xl" placeholder="e.g. Customer paid ABL, logged as BBL">
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block font-semibold mb-1">Debit account</label>
+                <select id="mjDebit" class="w-full p-2 border border-slate-300 rounded-xl bg-white">
+                  <option>Cash (drawer)</option>
+                  <option>ABL (bank)</option>
+                  <option>BBL (bank)</option>
+                  <option>Customer Deposits</option>
+                  <option>Book Sales</option>
+                  <option>Other Sales</option>
+                  <option>GST Payable</option>
+                  <option>COGS</option>
+                  <option>Inventory Asset</option>
+                  <option>Suspense / Clearing</option>
+                </select>
+              </div>
+              <div>
+                <label class="block font-semibold mb-1">Credit account</label>
+                <select id="mjCredit" class="w-full p-2 border border-slate-300 rounded-xl bg-white">
+                  <option>Cash (drawer)</option>
+                  <option selected>ABL (bank)</option>
+                  <option>BBL (bank)</option>
+                  <option>Customer Deposits</option>
+                  <option>Book Sales</option>
+                  <option>Other Sales</option>
+                  <option>GST Payable</option>
+                  <option>COGS</option>
+                  <option>Inventory Asset</option>
+                  <option>Suspense / Clearing</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label class="block font-semibold mb-1">Amount (BZD)</label>
+              <input type="number" min="0" step="0.01" id="mjAmount" value="0.00" class="w-full p-2 border border-slate-300 rounded-xl font-mono font-bold">
+            </div>
+            <p class="text-[10px] text-slate-500 leading-relaxed">This logs a balanced correction in History so you can copy the same lines into QuickBooks. It does <strong>not</strong> change past sales totals automatically — use it when money went to the wrong bank or you need a cash-to-bank deposit note.</p>
+            <div class="flex gap-2 pt-1">
+              <button type="button" onclick="saveManualJournal()" class="flex-1 bg-amber-700 hover:bg-amber-800 text-white font-bold py-2.5 rounded-xl">Save journal</button>
+              <button type="button" onclick="closeModal('manualJournalModal')" class="px-4 py-2.5 border border-slate-300 rounded-xl text-slate-700">Cancel</button>
+            </div>
           </div>
         </div>
       </div>
@@ -3479,14 +3581,14 @@
           <div class="bg-cyan-800 p-5 text-white flex items-center justify-between">
             <div>
               <h3 class="font-bold text-base">Add service</h3>
-              <p class="text-xs text-cyan-100">Non-inventory — gift wrap, shipping, membership, etc.</p>
+              <p class="text-xs text-cyan-100">Non-inventory — shipping, membership, printing, etc.</p>
             </div>
             <button type="button" onclick="closeModal('addServiceModal')" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
           </div>
           <div class="p-5 space-y-3 text-xs">
             <div>
               <label class="block font-semibold mb-1">Service name <span class="text-rose-600">*</span></label>
-              <input type="text" id="svcName" class="w-full p-2.5 border border-slate-300 rounded-xl" placeholder="e.g. Gift wrapping">
+              <input type="text" id="svcName" class="w-full p-2.5 border border-slate-300 rounded-xl" placeholder="e.g. Shipping to Belize City">
             </div>
             <div class="grid grid-cols-2 gap-2">
               <div>
@@ -3496,7 +3598,6 @@
               <div>
                 <label class="block font-semibold mb-1">Category</label>
                 <select id="svcCategory" class="w-full p-2.5 border border-slate-300 rounded-xl bg-white">
-                  <option>Gift wrap</option>
                   <option>Shipping / delivery</option>
                   <option>Membership</option>
                   <option>Printing / copy</option>
@@ -3608,38 +3709,40 @@
             <li><strong>Buying → Consolidation</strong> — Assign the order to a freight box; receive stock when it “arrives”.</li>
             <li><strong>AR</strong> — See open balances (Luis Panti ready to invoice + Janet Williams credit sale).</li>
             <li><strong>Register</strong> — Invoice Luis’s pickup with deposit applied, or ring a walk-in sale.</li>
-            <li><strong>History / QBO</strong> — Review till totals and confirm a weekly journal posting.</li>
+            <li><strong>History</strong> — Confirm till posting from Register, open monthly amounts for detail, use Journal entry for cash-to-bank / corrections.</li>
           </ol>
         </div>
 
         <div class="wood-card p-5 rounded-3xl border-l-4 border-l-[#234E35]">
           <h2 class="font-brand-heading font-bold text-lg text-[#34180A]">Training — how Los Bookies Hub works</h2>
-          <p class="text-xs text-stone-600 mt-1">Last update: 26 Sep 2026 — Sales tab merges Pre-Orders · Register · AR · QBO. Invoice only after arrival. Deposit must pick a specific pre-order. Freight renamed Consolidation.</p>
+          <p class="text-xs text-stone-600 mt-1">Last update: 20 Oct 2026 — Register till splits <strong>Book Sales</strong> vs <strong>Other Sales</strong> (services). History has monthly GL drill-down, date filters, and <strong>Journal entry</strong> for bank reclasses / cash-to-bank. Multi-book pre-orders via “+ Another book”. Gift wrap is not a service category (use free gift wrap perk or Other service if charged).</p>
         </div>
 
         <div class="wood-card p-4 rounded-2xl space-y-2 text-xs">
           <h3 class="font-bold text-[#34180A]">The big picture</h3>
           <ol class="list-decimal ml-4 space-y-1 text-stone-700">
             <li>Customer reserves a book → you take a <strong>deposit</strong> (liability, not a sale yet).</li>
-            <li>You batch books and buy them on <strong>Amazon</strong>.</li>
-            <li>You match the bank <strong>credit card</strong> charges to those Amazon orders.</li>
+            <li>You batch books and buy them from a <strong>vendor</strong> (Amazon, Book Depository, etc.).</li>
+            <li>You match the bank <strong>credit card</strong> charges to those vendor orders.</li>
             <li>Books ship in a <strong>freight box</strong> to Belize; you receive and price stock.</li>
             <li>Customer picks up → convert deposit to a <strong>sale</strong> (or use POS).</li>
-            <li>Every Friday / month-end → post the week’s money in <strong>QBO Journal</strong>.</li>
+            <li>Every Friday / month-end → confirm till on Register, review <strong>History</strong>, post the same lines in QuickBooks.</li>
           </ol>
         </div>
 
         <div class="wood-card p-4 rounded-2xl space-y-2 text-xs">
-          <h3 class="font-bold text-[#34180A]">Each tab</h3>
+          <h3 class="font-bold text-[#34180A]">Each tab (current layout)</h3>
           <ul class="space-y-2 text-stone-700">
-            <li><strong>Pre-Orders</strong> — Register customer + book + deposit only. Status starts as <em>Pending Purchase</em>. Select rows → <strong>Batch</strong> to build an Amazon order. You can also add <em>Stock</em> (no buyer) or <em>Other</em> lines (shipping, etc.).</li>
-            <li><strong>Accounts Receivable</strong> — Who still owes money: open pre-order balances and credit sales. <em>Receive Payment</em> collects cash / transfer (ABL or BBL). <em>Invoice</em> jumps to POS with deposit pre-filled for pickup.</li>
-            <li><strong>Buying</strong> — One place for Amazon work with three sub-tabs: <em>Orders</em>, <em>CC Charges</em> (import/log &amp; link), <em>Freight</em> (boxes &amp; receive). Credit-card / box icons on an order ask you which charge or box to use.</li>
-            <li><strong>Receive stock</strong> — (1) Costs: unit cost, line total, prelanding cost, freight split <em>equally by qty</em>, landed/unit BZD. (2) Customer holds: pre-order copies are reserved — <strong>no invoice yet</strong>. (3) Short-ships. (4) Stock journal. Invoice only when the customer picks up (POS).</li>
-            <li><strong>POS</strong> — Sales register. Invoice from Pre-Orders/AR opens POS with deposit applied; collect the balance then.</li>
-            <li><strong>QBO Journal</strong> — Weekly checklist: deposits, sales, stock receive, AR collections. Pick a template, copy the lines into QuickBooks, then Confirm posting here.</li>
-            <li><strong>Training</strong> — This page.</li>
-            <li><strong>Storefront</strong> (header) — Customer-facing shelves by age. Only published stock appears.</li>
+            <li><strong>Sales → Pre-Orders</strong> — Customer + book + deposit. Status starts <em>Pending Purchase</em>. Use <em>+ Another book</em> to log multiple titles for the same customer. Select rows → <strong>Batch</strong> for a vendor order. Add <em>Stock</em> or <em>Other</em> lines in the batch modal.</li>
+            <li><strong>Sales → Register</strong> — POS cart + <strong>Today’s till → QBO</strong>. Book sales and service (Other) sales are separate GLs. Confirm posting marks the day and saves a report under History.</li>
+            <li><strong>Sales → AR</strong> — Open balances (pre-order remainders + credit sales). Receive payment (Cash / ABL / BBL). Invoice jumps to Register with deposit applied.</li>
+            <li><strong>Sales → Inventory</strong> — Stock, services (non-inventory), write-offs, move Bookstore ↔ Library. Services: Shipping, Membership, Printing, Other — not gift wrap as a paid category.</li>
+            <li><strong>Sales → History</strong> — Monthly GL summary (This month / 3 months / All / Custom). <strong>Click any amount</strong> to see the transactions. <strong>Journal entry</strong> for cash-to-bank and wrong-account fixes. Posting history lists till posts and journals.</li>
+            <li><strong>Buying</strong> — Sub-tabs: <em>Orders</em>, <em>CC Charges</em>, <em>Freight / Consolidation</em>. Receive stock: landed cost, holds (no invoice yet), short-ships. Invoice only at pickup on Register.</li>
+            <li><strong>OWL</strong> — Orange Walk Library staff desk (holds, loans, returns). Public library shelves open from the storefront CTA.</li>
+            <li><strong>Training</strong> — This page + Load Full Demo.</li>
+            <li><strong>Library</strong> (header) — Staff view of library-located titles.</li>
+            <li><strong>Storefront</strong> — Customer shelves by age; only published stock.</li>
           </ul>
         </div>
 
@@ -3649,14 +3752,18 @@
           <ul class="list-disc ml-4 space-y-1.5 text-stone-700">
             <li><strong>Customer deposits (pre-orders)</strong> — Sum of deposits taken that week.<br>
               Dr Bank (Cash / ABL / BBL) · Cr Customer deposits (liability)</li>
-            <li><strong>Cash &amp; transfer sales</strong> — POS paid sales + pickups fully paid.<br>
-              Dr Bank · Cr Sales (incl. GST split if you track it)</li>
-            <li><strong>Adding stock (when a freight box is received)</strong> — Landed cost of that box.<br>
-              Dr Inventory · Cr Inventory in-transit</li>
-            <li><strong>Credit collections</strong> — Payments received on open AR.<br>
+            <li><strong>Book sales</strong> — Inventory items sold at Register (excl. GST split if you track it).<br>
+              Dr Bank · Cr Book Sales · Cr GST Payable</li>
+            <li><strong>Other sales</strong> — Services (shipping, membership, printing, etc.).<br>
+              Dr Bank · Cr Other Sales · Cr GST Payable</li>
+            <li><strong>Cash to bank</strong> — When you deposit the till drawer. Do the bank deposit in <strong>QBO</strong>; optionally log the same move here with History → <em>Journal entry</em> (Cash drawer → ABL/BBL).</li>
+            <li><strong>Adding stock (freight received)</strong> — Landed cost of that box.<br>
+              Dr Inventory · Cr Inventory in-transit (or CC payable)</li>
+            <li><strong>Credit collections</strong> — Payments on open AR.<br>
               Dr Bank · Cr Accounts receivable</li>
+            <li><strong>Corrections</strong> — Wrong bank, mis-tagged deposit: History → <em>Journal entry</em>, then mirror in QBO.</li>
           </ul>
-          <p class="text-stone-600 pt-1">Use the <strong>QBO Journal</strong> tab to generate the lines, post them in QuickBooks, then hit <em>Confirm posting</em> here so you don’t double-post.</p>
+          <p class="text-stone-600 pt-1">On <strong>Register</strong>, use <em>Confirm posting to QB</em> for the day’s till. On <strong>History</strong>, review the monthly grid and posting list so you don’t double-post.</p>
         </div>
 
         <div class="wood-card p-4 rounded-2xl space-y-2 text-xs">
@@ -3669,7 +3776,59 @@
         </div>
       </section>
 
-      <section id="libraryTab" class="hidden space-y-5">
+      
+      <section id="websiteTab" class="hidden space-y-5">
+        <div class="wood-card p-5 rounded-3xl border-l-4 border-l-indigo-600 bg-indigo-50/40">
+          <h2 class="font-brand-heading font-bold text-lg text-[#34180A]">Website — storefront banners</h2>
+          <p class="text-xs text-stone-600 mt-1">Edit hero carousel (Home) and strip banners here. Changes save in this browser and update the public storefront. No Google Sheet required when live.</p>
+        </div>
+
+        <div class="wood-card p-4 rounded-2xl space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-bold text-[#34180A] text-sm">Hero carousel (Home · 960×400)</h3>
+            <button type="button" onclick="addWebsiteBanner('hero1')" class="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl">+ Add banner</button>
+          </div>
+          <div id="websiteHero1List" class="space-y-2"></div>
+        </div>
+
+        <div class="wood-card p-4 rounded-2xl space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-bold text-[#34180A] text-sm">Strip banners (960×160)</h3>
+            <button type="button" onclick="addWebsiteBanner('hero2')" class="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl">+ Add strip</button>
+          </div>
+          <div id="websiteHero2List" class="space-y-2"></div>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <button type="button" onclick="saveWebsiteBanners()" class="bg-[#234E35] hover:bg-[#1A3B28] text-white font-bold px-4 py-2.5 rounded-xl text-xs">Save banners</button>
+          <button type="button" onclick="reloadWebsiteBannersFromDefaults()" class="bg-white border border-[#DACBB0] text-[#5C3419] font-bold px-4 py-2.5 rounded-xl text-xs">Reset to built-in defaults</button>
+        </div>
+        <p class="text-[10px] text-stone-500">Tip: host images on ibb.co or your own host, paste the direct image URL. WhatsApp message becomes the click action on the storefront.</p>
+
+        <div class="wood-card p-4 rounded-2xl space-y-3 border-l-4 border-l-[#3A1F10]">
+          <h3 class="font-bold text-[#34180A] text-sm">Orange Walk Library — public page text</h3>
+          <p class="text-[11px] text-stone-600">Headline, blurb, perks, and “How to Borrow” steps. Saved on this device and applied to the public OWL page.</p>
+          <div>
+            <label class="block font-semibold text-[#2B170B] mb-1 text-xs">Headline</label>
+            <input type="text" id="owlEditTitle" class="w-full p-2.5 border border-[#DACBB0] rounded-xl text-xs font-bold" placeholder="Borrow Stories…">
+          </div>
+          <div>
+            <label class="block font-semibold text-[#2B170B] mb-1 text-xs">Description</label>
+            <textarea id="owlEditBody" rows="2" class="w-full p-2.5 border border-[#DACBB0] rounded-xl text-xs" placeholder="Browse our community shelves…"></textarea>
+          </div>
+          <div>
+            <label class="block font-semibold text-[#2B170B] mb-1 text-xs">Perks (one per line)</label>
+            <textarea id="owlEditPerks" rows="3" class="w-full p-2.5 border border-[#DACBB0] rounded-xl text-xs font-mono" placeholder="Standard 14-Day Lending&#10;Instant WhatsApp Hold&#10;$75/yr Membership or $5 Deposit"></textarea>
+          </div>
+          <div>
+            <label class="block font-semibold text-[#2B170B] mb-1 text-xs">How to Borrow (steps, one per line)</label>
+            <textarea id="owlEditHowTo" rows="5" class="w-full p-2.5 border border-[#DACBB0] rounded-xl text-xs" placeholder="1. Browse shelves…&#10;2. …"></textarea>
+          </div>
+          <button type="button" onclick="saveOwlPublicCopy()" class="bg-[#3A1F10] hover:bg-[#2B150A] text-[#F9E8B8] font-bold px-4 py-2.5 rounded-xl text-xs">Save OWL page text</button>
+        </div>
+      </section>
+
+<section id="libraryTab" class="hidden space-y-5">
         <div class="wood-card p-5 rounded-3xl border-l-4 border-l-[#234E35] space-y-3">
           <h2 class="font-brand-heading font-bold text-lg text-[#34180A]">Orange Walk Library</h2>
           <p class="text-xs text-stone-600 leading-relaxed">
@@ -3748,7 +3907,7 @@
         <div class="flex items-center space-x-2.5">
           <i class="fa-solid fa-file-excel text-emerald-300 text-xl"></i>
           <div>
-            <h3 class="font-bold text-base">Import Amazon Order Excel / CSV</h3>
+            <h3 class="font-bold text-base">Import vendor order (Excel / CSV paste)</h3>
             <p class="text-xs text-emerald-100">Converts USD invoice to landed Belize Dollars</p>
           </div>
         </div>
@@ -3764,7 +3923,7 @@
         </div>
 
         <div>
-          <label class="block font-semibold text-[#2B170B] mb-1">Amazon Order Number *</label>
+          <label class="block font-semibold text-[#2B170B] mb-1">Vendor order number *</label>
           <input type="text" id="excelOrderNum" value="112-9984117" class="w-full p-2.5 border border-[#DACBB0] rounded-xl font-mono font-bold">
         </div>
 
@@ -3801,6 +3960,7 @@
       <div class="bg-indigo-600 p-5 text-white flex items-center justify-between sticky top-0 z-10">
         <div>
           <h3 class="font-bold text-base">Pre Order Log</h3>
+          <p class="text-xs text-indigo-100 mt-0.5">One customer · one deposit · one or more books · invoice together when they arrive</p>
         </div>
         <button onclick="closeModal('logPreOrderModal')" class="text-white/80 hover:text-white text-lg">
           <i class="fa-solid fa-xmark"></i>
@@ -3819,33 +3979,54 @@
           </div>
         </div>
 
-        <div>
-          <label class="block font-semibold text-[#2B170B] mb-1">Book Title / Item Name *</label>
-          <input type="text" id="preBookTitle" placeholder="e.g. Onyx Storm" class="w-full p-2.5 border border-[#DACBB0] rounded-xl font-bold text-[#34180A]">
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="block font-semibold text-[#2B170B] mb-1">ISBN (10 or 13 digits)</label>
-            <input type="text" id="preBookIsbn" placeholder="9780593440599" class="w-full p-2.5 border border-[#DACBB0] rounded-xl font-mono text-xs">
+        <div class="rounded-2xl border border-[#DACBB0] bg-white p-3.5 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <div class="font-bold text-[#34180A] text-sm">Books on this order</div>
+            <span id="preDraftCountBadge" class="text-[10px] font-bold text-indigo-800 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">0 books</span>
           </div>
-          <div>
-            <label class="block font-semibold text-[#2B170B] mb-1">Book Format</label>
-            <select id="preBookFormat" class="w-full p-2.5 border border-[#DACBB0] rounded-xl bg-white font-medium">
-              <option value="Paperback">Paperback</option>
-              <option value="Hard Cover" selected>Hard Cover</option>
-            </select>
+
+          <div id="preDraftItemsList" class="space-y-1.5 max-h-36 overflow-y-auto">
+            <p class="text-[11px] text-stone-400 italic py-2 text-center">No books yet — fill the fields below and click Add book.</p>
+          </div>
+
+          <div class="border-t border-[#EADBBE] pt-3 space-y-2.5">
+            <div>
+              <label class="block font-semibold text-[#2B170B] mb-1">Book Title / Item Name *</label>
+              <input type="text" id="preBookTitle" placeholder="e.g. Onyx Storm" class="w-full p-2.5 border border-[#DACBB0] rounded-xl font-bold text-[#34180A]">
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div>
+                <label class="block font-semibold text-[#2B170B] mb-1">ISBN</label>
+                <input type="text" id="preBookIsbn" placeholder="978…" class="w-full p-2 border border-[#DACBB0] rounded-xl font-mono text-xs">
+              </div>
+              <div>
+                <label class="block font-semibold text-[#2B170B] mb-1">Format</label>
+                <select id="preBookFormat" class="w-full p-2 border border-[#DACBB0] rounded-xl bg-white font-medium">
+                  <option value="Paperback">Paperback</option>
+                  <option value="Hard Cover" selected>Hard Cover</option>
+                </select>
+              </div>
+              <div>
+                <label class="block font-semibold text-[#2B170B] mb-1">Price (BZ$)</label>
+                <input type="number" step="0.50" id="preLinePrice" value="65.00" class="w-full p-2 border border-[#DACBB0] rounded-xl font-bold text-[#234E35]">
+              </div>
+            </div>
+            <button type="button" onclick="addPreOrderLineToDraft()" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 rounded-xl flex items-center justify-center gap-1.5">
+              <i class="fa-solid fa-plus text-[10px]"></i> Add book to this order
+            </button>
           </div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-[#FAF4E5] p-3.5 rounded-2xl border border-[#DACBB0]">
           <div>
-            <label class="block font-semibold text-[#2B170B] mb-1">Selling Price (BZ$) *</label>
-            <input type="number" step="0.50" id="preSellingPrice" placeholder="65.00" oninput="recalcPreOrderDepositBalance()" class="w-full p-2 border border-[#DACBB0] rounded-xl font-bold text-[#234E35]">
+            <label class="block font-semibold text-[#2B170B] mb-1">Order total (BZ$)</label>
+            <div id="preOrderTotalDisplay" class="p-2 text-sm font-bold text-[#234E35] font-mono">BZ$0.00</div>
+            <input type="hidden" id="preSellingPrice" value="0">
           </div>
           <div>
             <label class="block font-semibold text-[#2B170B] mb-1">Deposit Paid (BZ$) *</label>
-            <input type="number" step="0.50" id="preDepositPaid" placeholder="35.00" oninput="recalcPreOrderDepositBalance()" class="w-full p-2 border border-[#DACBB0] rounded-xl font-bold text-amber-900">
+            <input type="number" step="0.50" id="preDepositPaid" placeholder="0.00" oninput="recalcPreOrderDepositBalance()" class="w-full p-2 border border-[#DACBB0] rounded-xl font-bold text-amber-900">
+            <p class="text-[9px] text-stone-500 mt-0.5">One deposit for the whole order (full or portion)</p>
           </div>
           <div>
             <label class="block font-semibold text-[#7A6755] mb-1">Remaining AR Balance</label>
@@ -3877,14 +4058,15 @@
           <input type="text" id="preNotes" placeholder="e.g. Needs special gift wrapping or specific edition" class="w-full p-2 border border-[#DACBB0] rounded-xl">
         </div>
 
-        <div class="flex gap-2 pt-2">
-          <button onclick="savePreOrderEntry()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl shadow-xs">
-            Confirm
+        <div class="flex flex-wrap gap-2 pt-2">
+          <button onclick="savePreOrderEntry()" class="flex-1 min-w-[140px] bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl shadow-xs">
+            Confirm order
           </button>
           <button onclick="closeModal('logPreOrderModal')" class="px-4 py-2.5 rounded-xl border border-[#DACBB0] text-[#5C3419]">
             Cancel
           </button>
         </div>
+        <p class="text-[10px] text-[#7A6755] -mt-1">All books stay on <strong>one pre-order</strong> with a shared deposit. After they arrive, invoice the whole order together at pickup.</p>
       </div>
     </div>
   </div>
@@ -3893,8 +4075,8 @@
     <div class="bg-[#FFFDF9] rounded-3xl max-w-2xl w-full overflow-hidden shadow-2xl border border-[#DACBB0] max-h-[95vh] overflow-y-auto">
       <div class="bg-[#234E35] p-5 text-white flex items-center justify-between sticky top-0 z-10">
         <div class="flex items-center space-x-2.5">
-          <i class="fa-brands fa-amazon text-amber-400 text-2xl"></i>
-          <h3 class="font-bold text-base">Batch Selected into Amazon Order</h3>
+          <i class="fa-solid fa-store text-amber-400 text-2xl"></i>
+          <h3 class="font-bold text-base">Batch into vendor order</h3>
         </div>
         <button onclick="closeModal('batchToAmazonModal')" class="text-white/80 hover:text-white text-lg">
           <i class="fa-solid fa-xmark"></i>
@@ -3903,15 +4085,26 @@
 
       <div class="p-6 space-y-4 text-xs">
         <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-          <div class="sm:col-span-4">
+          <div class="sm:col-span-3">
+            <label class="block font-semibold text-[#2B170B] mb-1">Vendor</label>
+            <select id="batchVendorName" class="w-full p-2.5 border border-[#DACBB0] rounded-xl bg-white font-semibold">
+              <option value="Amazon">Amazon</option>
+              <option value="Book Depository">Book Depository</option>
+              <option value="Barnes &amp; Noble">Barnes &amp; Noble</option>
+              <option value="AbeBooks">AbeBooks</option>
+              <option value="Local supplier">Local supplier</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div class="sm:col-span-3">
             <label class="block font-semibold text-[#2B170B] mb-1">Order #</label>
             <input type="text" id="batchAmazonOrderNum" class="w-full p-2.5 border border-[#DACBB0] rounded-xl font-mono font-bold">
           </div>
-          <div class="sm:col-span-4">
+          <div class="sm:col-span-3">
             <label class="block font-semibold text-[#2B170B] mb-1">Date</label>
             <input type="date" id="batchAmazonOrderDate" class="w-full p-2.5 border border-[#DACBB0] rounded-xl">
           </div>
-          <div class="sm:col-span-4">
+          <div class="sm:col-span-3">
             <label class="block font-semibold text-[#2B170B] mb-1">Total</label>
             <div class="w-full px-3 py-2 border border-emerald-400/80 rounded-xl bg-emerald-50 flex items-center justify-center shadow-2xs h-[42px]">
               <span id="batchTopUsdTotal" class="text-sm font-mono font-extrabold text-emerald-950">$0.00 USD</span>
@@ -3937,7 +4130,7 @@
 
         <div class="flex gap-2 pt-2">
           <button onclick="commitBatchToAmazonOrder()" class="flex-1 bg-[#234E35] hover:bg-[#1A3B28] text-white font-bold py-2.5 rounded-xl shadow-xs">
-            Confirm &amp; Place Amazon Order
+            Confirm &amp; place vendor order
           </button>
           <button onclick="closeModal('batchToAmazonModal')" class="px-4 py-2.5 rounded-xl border border-[#DACBB0] text-[#5C3419]">
             Cancel
@@ -4287,7 +4480,7 @@
         <!-- STEP 4: Short-ship follow-up -->
         <div id="receiveStep4" class="space-y-3 hidden">
           <div class="font-bold text-orange-950 text-sm">Short-shipped pre-orders — customer follow-up</div>
-          <p class="text-[11px] text-stone-600">Paid on Amazon but not in this box. Wait for next shipment or refund.</p>
+          <p class="text-[11px] text-stone-600">Paid at vendor but not in this box. Wait for next shipment or refund.</p>
           <div id="receiveShortShipList" class="space-y-1.5 max-h-[50vh] overflow-y-auto"></div>
           <p id="receiveShortEmpty" class="text-stone-400 italic hidden">No short-shipped pre-orders for this receive.</p>
         </div>
@@ -4399,7 +4592,7 @@
       <div class="bg-emerald-800 p-5 text-white flex items-center justify-between">
         <div>
           <h3 class="font-bold text-base">Add stock for resale</h3>
-          <p class="text-xs text-emerald-100">No customer — shelf stock on this Amazon order</p>
+          <p class="text-xs text-emerald-100">No customer — shelf stock on this vendor order</p>
         </div>
         <button onclick="closeModal('batchStockModal')" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
       </div>
@@ -4762,6 +4955,338 @@
       }
     }
 
+
+    // —— Website banners editor (replaces Google Sheet for live site) ——
+    function getHero1Source() {
+      if (typeof hero1List !== 'undefined' && hero1List && hero1List.length) return hero1List;
+      if (typeof REAL_HERO_1_BANNERS !== 'undefined') return REAL_HERO_1_BANNERS.map(b => Object.assign({}, b));
+      return [];
+    }
+    function getHero2Source() {
+      if (typeof hero2List !== 'undefined' && hero2List && hero2List.length) return hero2List;
+      if (typeof REAL_HERO_2_STRIP_BANNERS !== 'undefined') return REAL_HERO_2_STRIP_BANNERS.map(b => Object.assign({}, b));
+      return [];
+    }
+
+    let _editHero1 = [];
+    let _editHero2 = [];
+
+
+    const OWL_COPY_DEFAULTS = {
+      title: 'Borrow Stories, Classics & New Worlds from Orange Walk',
+      body: 'Browse our community shelves curated by age groups. Reserve any available title via WhatsApp with zero account setup required.',
+      perks: ['Standard 14-Day Lending', 'Instant WhatsApp Hold', '$75/yr Membership or $5 Deposit'],
+      howTo: [
+        'Browse shelves by age group (Kids, Middle Grade, Young Adult, Adult).',
+        'Open a book and tap Reserve (WhatsApp).',
+        'Send the hold message to Los Bookies — no account needed.',
+        'Pick up at the library or ask about shipping.',
+        'Membership $75/year or $5 refundable deposit per book. Standard loan: 14 days.'
+      ]
+    };
+
+    function loadOwlPublicCopy() {
+      try {
+        const raw = localStorage.getItem('losBookiesOwlCopy');
+        if (raw) return Object.assign({}, OWL_COPY_DEFAULTS, JSON.parse(raw));
+      } catch (e) {}
+      return Object.assign({}, OWL_COPY_DEFAULTS);
+    }
+
+    function applyOwlPublicCopyToDom() {
+      const c = loadOwlPublicCopy();
+      const t = document.getElementById('owlHeroTitle');
+      const b = document.getElementById('owlHeroBody');
+      const p = document.getElementById('owlHeroPerks');
+      if (t) t.textContent = c.title || OWL_COPY_DEFAULTS.title;
+      if (b) b.textContent = c.body || OWL_COPY_DEFAULTS.body;
+      if (p && Array.isArray(c.perks)) {
+        p.innerHTML = c.perks.filter(Boolean).map(function (x) {
+          return '<span>✓ ' + String(x).replace(/^✓\s*/, '') + '</span>';
+        }).join('');
+      }
+    }
+
+    function fillOwlCopyEditor() {
+      const c = loadOwlPublicCopy();
+      const t = document.getElementById('owlEditTitle');
+      const b = document.getElementById('owlEditBody');
+      const p = document.getElementById('owlEditPerks');
+      const h = document.getElementById('owlEditHowTo');
+      if (t) t.value = c.title || '';
+      if (b) b.value = c.body || '';
+      if (p) p.value = (c.perks || []).join('\n');
+      if (h) h.value = (c.howTo || []).join('\n');
+    }
+
+    function saveOwlPublicCopy() {
+      const copy = {
+        title: (document.getElementById('owlEditTitle')?.value || '').trim() || OWL_COPY_DEFAULTS.title,
+        body: (document.getElementById('owlEditBody')?.value || '').trim() || OWL_COPY_DEFAULTS.body,
+        perks: (document.getElementById('owlEditPerks')?.value || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean),
+        howTo: (document.getElementById('owlEditHowTo')?.value || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean)
+      };
+      try { localStorage.setItem('losBookiesOwlCopy', JSON.stringify(copy)); } catch (e) {}
+      applyOwlPublicCopyToDom();
+      showToast('OWL public page text saved.', 'success');
+    }
+
+    function openHowToBorrowModal() {
+      const c = loadOwlPublicCopy();
+      const body = document.getElementById('howToBorrowBody');
+      if (body) {
+        const steps = (c.howTo && c.howTo.length) ? c.howTo : OWL_COPY_DEFAULTS.howTo;
+        body.innerHTML = '<ol class="list-decimal ml-4 space-y-2">' +
+          steps.map(function (s) { return '<li>' + s.replace(/</g, '&lt;') + '</li>'; }).join('') +
+          '</ol>';
+      }
+      document.getElementById('howToBorrowModal')?.classList.remove('hidden');
+    }
+    window.openHowToBorrowModal = openHowToBorrowModal;
+
+    function openImportStockModal() {
+      const ta = document.getElementById('importStockPaste');
+      if (ta) ta.value = '';
+      const cb = document.getElementById('importStockReplace');
+      if (cb) cb.checked = false;
+      document.getElementById('importStockModal')?.classList.remove('hidden');
+    }
+    window.openImportStockModal = openImportStockModal;
+
+    function parseImportStockRows(text) {
+      const lines = String(text || '').split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+      if (!lines.length) return [];
+      function splitRow(line) {
+        if (line.indexOf('\t') >= 0) return line.split('\t').map(function (c) { return c.trim(); });
+        // simple CSV (no nested quotes support beyond basic)
+        const out = [];
+        let cur = '', inQ = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') { inQ = !inQ; continue; }
+          if (ch === ',' && !inQ) { out.push(cur.trim()); cur = ''; continue; }
+          cur += ch;
+        }
+        out.push(cur.trim());
+        return out;
+      }
+      let start = 0;
+      let cols = splitRow(lines[0]).map(function (c) { return c.toLowerCase(); });
+      const headerLike = cols.some(function (c) { return /title|isbn|author|price|stock|qty/.test(c); });
+      const map = { title: -1, author: -1, isbn: -1, price: -1, stock: -1, format: -1, age: -1, genre: -1, location: -1, synopsis: -1, image: -1 };
+      if (headerLike) {
+        cols.forEach(function (c, i) {
+          if (/^title/.test(c)) map.title = i;
+          else if (/author/.test(c)) map.author = i;
+          else if (/isbn/.test(c)) map.isbn = i;
+          else if (/price|sell/.test(c)) map.price = i;
+          else if (/stock|qty|quantity|on hand/.test(c)) map.stock = i;
+          else if (/format|binding/.test(c)) map.format = i;
+          else if (/age|shelf|category/.test(c)) map.age = i;
+          else if (/genre/.test(c)) map.genre = i;
+          else if (/location|loc/.test(c)) map.location = i;
+          else if (/synop|desc/.test(c)) map.synopsis = i;
+          else if (/image|cover|url/.test(c)) map.image = i;
+        });
+        start = 1;
+      } else {
+        // Title, Author, ISBN, Price, Stock, Format, Age, Genre, Location
+        map.title = 0; map.author = 1; map.isbn = 2; map.price = 3; map.stock = 4;
+        map.format = 5; map.age = 6; map.genre = 7; map.location = 8; map.synopsis = 9; map.image = 10;
+      }
+      const rows = [];
+      for (let li = start; li < lines.length; li++) {
+        const cells = splitRow(lines[li]);
+        const get = function (key) { const i = map[key]; return i >= 0 && cells[i] != null ? cells[i] : ''; };
+        const title = get('title');
+        if (!title) continue;
+        let priceStr = get('price') || '0';
+        const priceNum = parseFloat(String(priceStr).replace(/[^0-9.]/g, '')) || 0;
+        const stock = parseInt(get('stock'), 10);
+        let age = get('age') || 'Adult';
+        if (/kid|children/i.test(age)) age = 'Kids';
+        else if (/middle/i.test(age)) age = 'Middle Grade';
+        else if (/young|^ya$/i.test(age)) age = 'Young Adult';
+        else if (/adult/i.test(age)) age = 'Adult';
+        let loc = get('location') || 'Bookstore';
+        if (/lib|owl/i.test(loc)) loc = 'Library';
+        else loc = 'Bookstore';
+        const isbn = get('isbn');
+        rows.push({
+          id: isbn ? ('ISBN-' + isbn) : ('CAT-IMP-' + Date.now() + '-' + li),
+          isbn: isbn,
+          title: title,
+          author: get('author') || '',
+          genre: get('genre') || 'General',
+          age: age,
+          ageCategory: age,
+          format: get('format') || 'Paperback',
+          price: '$' + priceNum.toFixed(2),
+          cost: 0,
+          synopsis: get('synopsis') || '',
+          imageUrl: get('image') || (isbn && String(isbn).replace(/\D/g, '').length >= 10
+            ? ('https://covers.openlibrary.org/b/isbn/' + String(isbn).replace(/[^0-9X]/gi, '') + '-L.jpg') : ''),
+          stock: isNaN(stock) ? 1 : Math.max(0, stock),
+          published: true,
+          location: loc,
+          isPreOrder: false,
+          isService: false
+        });
+      }
+      return rows;
+    }
+
+    function commitImportStock() {
+      const text = document.getElementById('importStockPaste')?.value || '';
+      const rows = parseImportStockRows(text);
+      if (!rows.length) {
+        showToast('No valid rows found. Need at least a Title column.', 'warning');
+        return;
+      }
+      const replace = document.getElementById('importStockReplace')?.checked;
+      if (!state.catalog) state.catalog = [];
+      if (replace) {
+        // keep services
+        const services = state.catalog.filter(c => c.isService);
+        state.catalog = services.concat(rows);
+      } else {
+        rows.forEach(function (r) {
+          const existing = state.catalog.find(c =>
+            (r.isbn && c.isbn && String(c.isbn) === String(r.isbn)) ||
+            ((c.title || '').toLowerCase() === (r.title || '').toLowerCase() && !c.isService)
+          );
+          if (existing) {
+            existing.stock = r.stock;
+            existing.price = r.price;
+            existing.author = r.author || existing.author;
+            existing.format = r.format || existing.format;
+            existing.ageCategory = r.ageCategory || existing.ageCategory;
+            existing.age = r.age || existing.age;
+            existing.genre = r.genre || existing.genre;
+            existing.location = r.location || existing.location;
+            existing.synopsis = r.synopsis || existing.synopsis;
+            if (r.imageUrl) existing.imageUrl = r.imageUrl;
+            existing.published = true;
+          } else {
+            state.catalog.push(r);
+          }
+        });
+      }
+      closeModal('importStockModal');
+      if (typeof renderInventoryTab === 'function') renderInventoryTab();
+      if (typeof renderOwlPublicShelves === 'function') renderOwlPublicShelves();
+      if (typeof renderShelves === 'function') renderShelves();
+      if (typeof saveAppState === 'function') saveAppState(true);
+      showToast('Imported ' + rows.length + ' title(s).', 'success');
+    }
+    window.commitImportStock = commitImportStock;
+
+
+    function renderWebsiteBannersEditor() {
+      try {
+        const saved = localStorage.getItem('losBookiesBanners');
+        if (saved) {
+          const b = JSON.parse(saved);
+          _editHero1 = (b.hero1 && b.hero1.length) ? b.hero1.map(x => Object.assign({}, x)) : getHero1Source().map(x => Object.assign({}, x));
+          _editHero2 = (b.hero2 && b.hero2.length) ? b.hero2.map(x => Object.assign({}, x)) : getHero2Source().map(x => Object.assign({}, x));
+        } else {
+          _editHero1 = getHero1Source().map(x => Object.assign({}, x));
+          _editHero2 = getHero2Source().map(x => Object.assign({}, x));
+        }
+      } catch (e) {
+        _editHero1 = getHero1Source().map(x => Object.assign({}, x));
+        _editHero2 = getHero2Source().map(x => Object.assign({}, x));
+      }
+      paintWebsiteBannerList('websiteHero1List', _editHero1, 'hero1');
+      paintWebsiteBannerList('websiteHero2List', _editHero2, 'hero2');
+      if (typeof fillOwlCopyEditor === 'function') fillOwlCopyEditor();
+    }
+
+    function paintWebsiteBannerList(containerId, list, kind) {
+      const el = document.getElementById(containerId);
+      if (!el) return;
+      if (!list.length) {
+        el.innerHTML = '<p class="text-xs text-stone-400 italic">No banners yet.</p>';
+        return;
+      }
+      el.innerHTML = list.map((b, i) => {
+        const msg = b.waMessage || (b.linkUrl && b.linkUrl.includes('text=') ? decodeURIComponent((b.linkUrl.split('text=')[1] || '').replace(/\+/g, ' ')) : '');
+        return '<div class="border border-[#DACBB0] rounded-xl p-3 bg-white space-y-2" data-kind="' + kind + '" data-idx="' + i + '">' +
+          '<div class="flex gap-3">' +
+            (b.imageUrl ? '<img src="' + b.imageUrl.replace(/"/g, '') + '" alt="" class="w-24 h-12 object-cover rounded-lg border border-slate-200 shrink-0" onerror="this.style.display=\'none\'">' : '') +
+            '<div class="flex-1 min-w-0 space-y-1.5">' +
+              '<input type="text" value="' + (b.altText || '').replace(/"/g, '&quot;') + '" onchange="updateWebsiteBannerField(\'' + kind + '\',' + i + ',\'altText\',this.value)" placeholder="Label" class="w-full text-xs p-1.5 border border-[#DACBB0] rounded-lg font-bold">' +
+              '<input type="text" value="' + (b.imageUrl || '').replace(/"/g, '&quot;') + '" onchange="updateWebsiteBannerField(\'' + kind + '\',' + i + ',\'imageUrl\',this.value)" placeholder="Image URL" class="w-full text-[11px] p-1.5 border border-[#DACBB0] rounded-lg font-mono">' +
+              '<textarea rows="2" onchange="updateWebsiteBannerField(\'' + kind + '\',' + i + ',\'waMessage\',this.value)" placeholder="WhatsApp message when customer taps" class="w-full text-[11px] p-1.5 border border-[#DACBB0] rounded-lg">' + (msg || '').replace(/</g, '&lt;') + '</textarea>' +
+            '</div>' +
+            '<button type="button" onclick="removeWebsiteBanner(\'' + kind + '\',' + i + ')" class="text-rose-600 hover:text-rose-800 p-1 shrink-0" title="Remove"><i class="fa-solid fa-trash"></i></button>' +
+          '</div></div>';
+      }).join('');
+    }
+
+    function updateWebsiteBannerField(kind, idx, field, value) {
+      const list = kind === 'hero2' ? _editHero2 : _editHero1;
+      if (!list[idx]) return;
+      list[idx][field] = value;
+      if (field === 'waMessage') {
+        const phone = (typeof WHATSAPP_PHONE !== 'undefined' ? WHATSAPP_PHONE : '5016034507');
+        list[idx].linkUrl = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(value || '');
+      }
+    }
+
+    function addWebsiteBanner(kind) {
+      const phone = (typeof WHATSAPP_PHONE !== 'undefined' ? WHATSAPP_PHONE : '5016034507');
+      const blank = { altText: 'New banner', imageUrl: '', linkUrl: 'https://wa.me/' + phone + '?text=', waMessage: 'Hi Los Bookies, 😊\n' };
+      if (kind === 'hero2') _editHero2.push(blank); else _editHero1.push(blank);
+      paintWebsiteBannerList(kind === 'hero2' ? 'websiteHero2List' : 'websiteHero1List', kind === 'hero2' ? _editHero2 : _editHero1, kind);
+    }
+
+    function removeWebsiteBanner(kind, idx) {
+      if (kind === 'hero2') _editHero2.splice(idx, 1); else _editHero1.splice(idx, 1);
+      paintWebsiteBannerList(kind === 'hero2' ? 'websiteHero2List' : 'websiteHero1List', kind === 'hero2' ? _editHero2 : _editHero1, kind);
+    }
+
+    function saveWebsiteBanners() {
+      // Rebuild linkUrl from waMessage
+      const phone = (typeof WHATSAPP_PHONE !== 'undefined' ? WHATSAPP_PHONE : '5016034507');
+      function normalize(list) {
+        return list.filter(b => (b.imageUrl || '').startsWith('http')).map(b => {
+          const msg = b.waMessage || '';
+          return {
+            altText: b.altText || 'Banner',
+            imageUrl: b.imageUrl,
+            linkUrl: 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg),
+            waMessage: msg
+          };
+        });
+      }
+      const hero1 = normalize(_editHero1);
+      const hero2 = normalize(_editHero2);
+      try {
+        localStorage.setItem('losBookiesBanners', JSON.stringify({ hero1: hero1, hero2: hero2 }));
+      } catch (e) {}
+      if (typeof hero1List !== 'undefined') hero1List = hero1;
+      if (typeof hero2List !== 'undefined') hero2List = hero2;
+      if (typeof REAL_HERO_1_BANNERS !== 'undefined') {
+        // keep defaults intact; runtime lists drive render
+      }
+      if (typeof renderHero1 === 'function') renderHero1();
+      if (typeof renderHero2Strip === 'function') renderHero2Strip();
+      showToast('Banners saved — storefront updated.', 'success');
+      if (typeof saveAppState === 'function') saveAppState(false);
+    }
+
+    function reloadWebsiteBannersFromDefaults() {
+      try { localStorage.removeItem('losBookiesBanners'); } catch (e) {}
+      if (typeof REAL_HERO_1_BANNERS !== 'undefined') hero1List = REAL_HERO_1_BANNERS.map(b => Object.assign({}, b));
+      if (typeof REAL_HERO_2_STRIP_BANNERS !== 'undefined') hero2List = REAL_HERO_2_STRIP_BANNERS.map(b => Object.assign({}, b));
+      renderWebsiteBannersEditor();
+      if (typeof renderHero1 === 'function') renderHero1();
+      if (typeof renderHero2Strip === 'function') renderHero2Strip();
+      showToast('Reset to built-in default banners.', 'info');
+    }
+
+
     function switchTab(tabName) {
       currentActiveTab = tabName;
       if (currentViewMode === 'storefront') {
@@ -4783,7 +5308,7 @@
       }
 
       // Hide all content panels
-      const tabs = ['preorders', 'ar', 'orders', 'pos', 'qbo', 'inventory', 'training', 'library'];
+      const tabs = ['preorders', 'ar', 'orders', 'pos', 'qbo', 'inventory', 'training', 'website', 'library'];
       tabs.forEach(t => {
         const el = document.getElementById(t + 'Tab');
         if (el) el.classList.add('hidden');
@@ -4830,10 +5355,11 @@
         storefront: 'hdrNavStorefront',
         owl: 'hdrNavOwl',
         training: 'hdrNavTraining',
+        website: 'hdrNavWebsite',
         library: 'hdrNavLibrary'
       };
       const activeHdrId = hdrMap[tabName] || hdrMap[currentActiveTab] || 'hdrNavSales';
-      ['hdrNavSales', 'hdrNavOrders', 'hdrNavStorefront', 'hdrNavOwl', 'hdrNavTraining', 'hdrNavLibrary'].forEach(id => {
+      ['hdrNavSales', 'hdrNavOrders', 'hdrNavStorefront', 'hdrNavOwl', 'hdrNavTraining', 'hdrNavWebsite', 'hdrNavLibrary'].forEach(id => {
         const btn = document.getElementById(id);
         if (!btn) return;
         if (id === activeHdrId) {
@@ -4853,6 +5379,7 @@
       }
       if (tabName === 'library') { if (typeof renderLibraryStaffGrid === 'function') renderLibraryStaffGrid(); }
       if (tabName === 'inventory') { if (typeof renderInventoryTab === 'function') renderInventoryTab(); }
+      if (tabName === 'website') { if (typeof renderWebsiteBannersEditor === 'function') renderWebsiteBannersEditor(); }
     }
 
     let currentSalesSub = 'preorders';
@@ -4973,7 +5500,7 @@
           row.className = "p-3 rounded-2xl bg-white border border-[#E8DCC5] text-xs space-y-1";
           row.innerHTML = `
             <div class="flex justify-between font-bold text-[#34180A]">
-              <span>Amazon #${ord.amazonOrderNum}</span>
+              <span>${ord.vendor || 'Vendor'} #${ord.amazonOrderNum}</span>
               <span class="font-mono text-emerald-900">BZ$${ordBZD.toFixed(2)}</span>
             </div>
             <div class="flex justify-between text-[11px] text-stone-500">
@@ -5021,7 +5548,8 @@
           else if (!['Ready to Invoice', 'Fulfilled'].includes(statusFilter) && p.status !== statusFilter) return false;
         }
         if (search) {
-          const haystack = `${p.customerName} ${p.customerContact} ${p.title} ${p.isbn} ${p.status}`.toLowerCase();
+          const itemTitles = (p.items || []).map(i => i.title + ' ' + (i.isbn || '')).join(' ');
+          const haystack = `${p.customerName} ${p.customerContact} ${p.title} ${p.isbn} ${p.status} ${itemTitles}`.toLowerCase();
           if (!haystack.includes(search)) return false;
         }
         return true;
@@ -5066,7 +5594,10 @@
           </td>
           <td class="py-3 px-3 cursor-pointer" onclick="openPreOrderDetail('${item.id}')">
             <div class="font-bold text-[#34180A]">${item.title}</div>
-            <div class="text-[10px] text-stone-500">${item.format || ''}${item.isbn ? ' · ' + item.isbn : ''}</div>
+            ${(item.items && item.items.length > 1)
+              ? `<div class="text-[10px] text-indigo-800 font-semibold mt-0.5">${item.items.length} books on this order</div>
+                 <div class="text-[10px] text-stone-500">${item.items.map(i => i.title).join(' · ')}</div>`
+              : `<div class="text-[10px] text-stone-500">${item.format || ''}${item.isbn ? ' · ' + item.isbn : ''}</div>`}
           </td>
           <td class="py-3 px-3 text-right">
             <div class="font-bold text-[#234E35]">BZ$${item.sellingPrice.toFixed(2)}</div>
@@ -5085,7 +5616,7 @@
               : ''}
             ${isPurchased
               ? `<button onclick="undoPreOrderMatch('${item.id}')" title="Undo match only" class="text-stone-600 hover:text-stone-900 p-1 text-xs"><i class="fa-solid fa-link-slash"></i></button>`
-              : `<button onclick="quickMoveSinglePreOrder('${item.id}')" title="Match to Amazon order" class="text-blue-800 hover:text-blue-950 p-1 text-xs"><i class="fa-solid fa-arrows-turn-to-dots"></i></button>`}
+              : `<button onclick="quickMoveSinglePreOrder('${item.id}')" title="Match to vendor order" class="text-blue-800 hover:text-blue-950 p-1 text-xs"><i class="fa-solid fa-arrows-turn-to-dots"></i></button>`}
             <button onclick="deletePreOrder('${item.id}')" title="Delete entry" class="text-rose-700 hover:text-rose-950 p-1 text-xs"><i class="fa-solid fa-trash"></i></button>
           </td>
         `;
@@ -5171,108 +5702,195 @@
       }
     }
 
+    let preDraftItems = [];
+
     function openLogPreOrderModal() {
+      preDraftItems = [];
       document.getElementById('preCustName').value = '';
       document.getElementById('preCustPhone').value = '';
       document.getElementById('preBookTitle').value = '';
       document.getElementById('preBookIsbn').value = '';
       document.getElementById('preBookFormat').value = 'Hard Cover';
+      const linePrice = document.getElementById('preLinePrice');
+      if (linePrice) linePrice.value = '65.00';
       const preBank = document.getElementById('preBankAccountWrap');
       if (preBank) preBank.classList.add('hidden');
       const prePay = document.getElementById('prePayMethod');
       if (prePay) prePay.value = 'Cash';
-      document.getElementById('preSellingPrice').value = '65.00';
-      document.getElementById('preDepositPaid').value = '35.00';
+      document.getElementById('preDepositPaid').value = '0.00';
       document.getElementById('preNotes').value = '';
+      renderPreDraftItems();
       recalcPreOrderDepositBalance();
       document.getElementById('logPreOrderModal').classList.remove('hidden');
       document.getElementById('preCustName').focus();
     }
 
+    function addPreOrderLineToDraft() {
+      const title = (document.getElementById('preBookTitle')?.value || '').trim();
+      const isbn = (document.getElementById('preBookIsbn')?.value || '').trim();
+      const format = document.getElementById('preBookFormat')?.value || 'Hard Cover';
+      const price = parseFloat(document.getElementById('preLinePrice')?.value) || 0;
+      if (!title) {
+        showToast('Enter a book title before adding.', 'warning');
+        document.getElementById('preBookTitle')?.focus();
+        return;
+      }
+      if (price <= 0) {
+        showToast('Enter a selling price greater than zero.', 'warning');
+        return;
+      }
+      preDraftItems.push({
+        id: 'line-' + Date.now() + '-' + preDraftItems.length,
+        title: title,
+        isbn: isbn,
+        format: format,
+        sellingPrice: price
+      });
+      document.getElementById('preBookTitle').value = '';
+      document.getElementById('preBookIsbn').value = '';
+      document.getElementById('preBookFormat').value = 'Hard Cover';
+      if (document.getElementById('preLinePrice')) document.getElementById('preLinePrice').value = '65.00';
+      renderPreDraftItems();
+      recalcPreOrderDepositBalance();
+      document.getElementById('preBookTitle')?.focus();
+      showToast('Added "' + title + '". Add more or Confirm order.', 'success');
+    }
+
+    function removePreDraftLine(lineId) {
+      preDraftItems = preDraftItems.filter(l => l.id !== lineId);
+      renderPreDraftItems();
+      recalcPreOrderDepositBalance();
+    }
+
+    function renderPreDraftItems() {
+      const list = document.getElementById('preDraftItemsList');
+      const badge = document.getElementById('preDraftCountBadge');
+      if (badge) badge.textContent = preDraftItems.length + ' book' + (preDraftItems.length === 1 ? '' : 's');
+      if (!list) return;
+      if (!preDraftItems.length) {
+        list.innerHTML = '<p class="text-[11px] text-stone-400 italic py-2 text-center">No books yet — fill the fields below and click Add book.</p>';
+        return;
+      }
+      list.innerHTML = preDraftItems.map(l =>
+        '<div class="flex items-center justify-between gap-2 p-2 rounded-xl border border-[#EADBBE] bg-[#FAF4E5]">' +
+          '<div class="min-w-0 flex-1">' +
+            '<div class="font-bold text-[#34180A] truncate">' + (l.title || '') + '</div>' +
+            '<div class="text-[10px] text-stone-500">' + (l.format || '') + (l.isbn ? ' · ' + l.isbn : '') + '</div>' +
+          '</div>' +
+          '<div class="font-mono font-bold text-[#234E35] whitespace-nowrap">BZ$' + Number(l.sellingPrice).toFixed(2) + '</div>' +
+          '<button type="button" onclick="removePreDraftLine(\'' + l.id + '\')" class="text-rose-600 hover:text-rose-800 p-1" title="Remove"><i class="fa-solid fa-trash text-[11px]"></i></button>' +
+        '</div>'
+      ).join('');
+    }
+
     function recalcPreOrderDepositBalance() {
-      const selling = parseFloat(document.getElementById('preSellingPrice').value) || 0;
-      const deposit = parseFloat(document.getElementById('preDepositPaid').value) || 0;
+      const selling = preDraftItems.reduce((s, l) => s + (Number(l.sellingPrice) || 0), 0);
+      const deposit = parseFloat(document.getElementById('preDepositPaid')?.value) || 0;
       const balance = Math.max(0, selling - deposit);
       const el = document.getElementById('preBalanceDisplay');
-      if (el) el.innerText = `BZ$${balance.toFixed(2)}`;
+      if (el) el.innerText = 'BZ$' + balance.toFixed(2);
+      const tot = document.getElementById('preOrderTotalDisplay');
+      if (tot) tot.innerText = 'BZ$' + selling.toFixed(2);
+      const hidden = document.getElementById('preSellingPrice');
+      if (hidden) hidden.value = selling.toFixed(2);
     }
 
     function savePreOrderEntry() {
       const custName = document.getElementById('preCustName').value.trim();
       const custPhone = document.getElementById('preCustPhone').value.trim();
-      const title = document.getElementById('preBookTitle').value.trim();
-      const isbn = document.getElementById('preBookIsbn').value.trim();
-      const format = document.getElementById('preBookFormat').value;
-      const sellingPrice = parseFloat(document.getElementById('preSellingPrice').value) || 0;
-      const depositPaid = parseFloat(document.getElementById('preDepositPaid').value) || 0;
-      const payMethod = document.getElementById('prePayMethod').value;
-      const bankAccount = payMethod === 'Online Transfer' ? (document.getElementById('preBankAccount')?.value || 'ABL') : '';
-      const status = 'Pending Purchase';
-      const notes = document.getElementById('preNotes').value.trim();
-
-      if (!custName || !title) {
-        showToast('Please provide both a customer name and book title.', 'warning');
+      // Allow adding current fields if user forgot to click "Add book"
+      const pendingTitle = (document.getElementById('preBookTitle')?.value || '').trim();
+      if (pendingTitle) {
+        addPreOrderLineToDraft();
+      }
+      if (!custName) {
+        showToast('Please provide a customer name.', 'warning');
+        return;
+      }
+      if (!preDraftItems.length) {
+        showToast('Add at least one book to this order.', 'warning');
         return;
       }
 
-      const estLandedBZD = sellingPrice / 1.45;
-      const estCostUSD = Math.round((estLandedBZD / LANDED_FACTOR) * 100) / 100;
-
+      const sellingPrice = preDraftItems.reduce((s, l) => s + (Number(l.sellingPrice) || 0), 0);
+      const depositPaid = parseFloat(document.getElementById('preDepositPaid').value) || 0;
+      const payMethod = document.getElementById('prePayMethod').value;
+      const bankAccount = payMethod === 'Online Transfer' ? (document.getElementById('preBankAccount')?.value || 'ABL') : '';
+      const notes = document.getElementById('preNotes').value.trim();
       const today = new Date().toISOString().split('T')[0];
+
+      const items = preDraftItems.map(l => ({
+        title: l.title,
+        isbn: l.isbn || '',
+        format: l.format || 'Hard Cover',
+        sellingPrice: Number(l.sellingPrice) || 0,
+        estimatedCostUSD: Math.round(((Number(l.sellingPrice) || 0) / 1.45 / (typeof LANDED_FACTOR !== 'undefined' ? LANDED_FACTOR : 2.5)) * 100) / 100 || 18
+      }));
+
+      const titleSummary = items.length === 1
+        ? items[0].title
+        : (items[0].title + ' +' + (items.length - 1) + ' more');
+
+      const estCostUSD = items.reduce((s, it) => s + (it.estimatedCostUSD || 18), 0);
+
       const newPreOrder = {
         id: 'PRE-' + Date.now(),
         customerName: custName,
         customerContact: custPhone,
-        isbn: isbn,
-        title: title,
-        format: format,
+        isbn: items[0].isbn || '',
+        title: titleSummary,
+        format: items[0].format,
+        items: items,
         sellingPrice: sellingPrice,
         depositReceived: depositPaid,
         paymentMethod: payMethod,
         bankAccount: bankAccount,
         dateLogged: today,
-        status: status,
+        status: 'Pending Purchase',
         linkedOrderId: null,
-        estimatedCostUSD: estCostUSD > 0 ? estCostUSD : 18.00,
+        estimatedCostUSD: estCostUSD,
         notes: notes,
         payments: depositPaid > 0 ? [{ date: today, amount: depositPaid, method: payMethod, bankAccount: bankAccount || '' }] : []
       };
 
       state.preOrders.unshift(newPreOrder);
 
-      const existingInCatalog = state.catalog.find(c => {
-        if (isbn && c.isbn) return c.isbn === isbn;
-        return c.title.toLowerCase() === title.toLowerCase() && (c.format || '').toLowerCase() === format.toLowerCase();
+      // Catalog stubs for each title
+      items.forEach(it => {
+        const existingInCatalog = state.catalog.find(c => {
+          if (it.isbn && c.isbn) return c.isbn === it.isbn;
+          return (c.title || '').toLowerCase() === (it.title || '').toLowerCase() && (c.format || '').toLowerCase() === (it.format || '').toLowerCase();
+        });
+        if (!existingInCatalog) {
+          const cleanIsbn = (it.isbn || '').replace(/[^0-9X]/gi, '');
+          const coverImg = cleanIsbn.length >= 10
+            ? 'https://covers.openlibrary.org/b/isbn/' + cleanIsbn + '-L.jpg'
+            : 'https://placehold.co/400x640/011d42/EDB926?text=' + encodeURIComponent(it.title);
+          state.catalog.unshift({
+            id: it.isbn ? ('ISBN-' + it.isbn) : ('CAT-' + (state.catalog.length + 1)),
+            isbn: it.isbn || '',
+            title: it.title,
+            author: custName ? ('Requested by ' + custName) : 'Customer Pre-Order',
+            genre: 'Pre-Order',
+            format: it.format,
+            price: '$' + Number(it.sellingPrice).toFixed(2),
+            cost: Number(it.sellingPrice) / 1.45,
+            imageUrl: coverImg,
+            isPreOrder: true,
+            stock: 0
+          });
+        }
       });
 
-      if (!existingInCatalog) {
-        const cleanIsbn = isbn.replace(/[^0-9X]/gi, '');
-        const coverImg = cleanIsbn.length >= 10 
-          ? `https://covers.openlibrary.org/b/isbn/${cleanIsbn}-L.jpg` 
-          : 'https://placehold.co/400x640/011d42/EDB926?text=' + encodeURIComponent(title);
-
-        const newCatalogBook = {
-          id: isbn ? `ISBN-${isbn}` : ('CAT-' + (state.catalog.length + 1)),
-          isbn: isbn,
-          title: title,
-          author: custName ? `Requested by ${custName}` : 'Customer Pre-Order',
-          genre: 'Pre-Order',
-          format: format,
-          price: '$' + sellingPrice.toFixed(2),
-          cost: estLandedBZD,
-          imageUrl: coverImg,
-          isPreOrder: true,
-          stock: 0
-        };
-        state.catalog.unshift(newCatalogBook);
-      }
-
+      preDraftItems = [];
       closeModal('logPreOrderModal');
-      showToast(`Pre-order for "${title}" logged with BZ$${depositPaid.toFixed(2)} deposit!`, 'success');
+      const bookWord = items.length === 1 ? '1 book' : (items.length + ' books');
+      showToast('Pre-order for ' + custName + ' — ' + bookWord + ' · deposit BZ$' + depositPaid.toFixed(2) + '. Invoice together when they arrive.', 'success');
       renderPreOrdersTable();
       updatePreOrdersMetrics();
       updateDashboardMetrics();
       updatePosTillSummary();
+      if (typeof persistSoon === 'function') persistSoon();
     }
 
     function deletePreOrder(id) {
@@ -5294,23 +5912,31 @@
 
       selectedPreOrderIds.forEach(id => {
         const item = state.preOrders.find(p => p.id === id);
-        if (item) {
-          const costUSD = typeof item.estimatedCostUSD === 'number' && item.estimatedCostUSD > 0 
-            ? item.estimatedCostUSD 
-            : 18.00;
-
+        if (!item) return;
+        const lines = (item.items && item.items.length) ? item.items : [{
+          title: item.title,
+          format: item.format || 'Paperback',
+          isbn: item.isbn || '',
+          estimatedCostUSD: item.estimatedCostUSD
+        }];
+        lines.forEach((line, idx) => {
+          const costUSD = typeof line.estimatedCostUSD === 'number' && line.estimatedCostUSD > 0
+            ? line.estimatedCostUSD
+            : (typeof item.estimatedCostUSD === 'number' && item.estimatedCostUSD > 0
+              ? (item.estimatedCostUSD / lines.length)
+              : 18.00);
           currentBatchItems.push({
-            lineId: 'line-' + item.id,
+            lineId: 'line-' + item.id + '-' + idx,
             preOrderId: item.id,
             isPreOrder: true,
-            title: item.title,
-            format: item.format || 'Paperback',
+            title: line.title || item.title,
+            format: line.format || item.format || 'Paperback',
             customerName: item.customerName || 'Pre-Order',
-            isbn: item.isbn || '',
+            isbn: line.isbn || item.isbn || '',
             costUSD: costUSD,
             qty: 1
           });
-        }
+        });
       });
 
       document.getElementById('batchAmazonOrderNum').value = '112-' + Math.floor(1000000 + Math.random() * 9000000);
@@ -5503,7 +6129,7 @@
 
     function commitBatchToAmazonOrder() {
       if (currentBatchItems.length === 0) {
-        showToast('Please have at least one line item in the Amazon order.', 'warning');
+        showToast('Please have at least one line item in the vendor order.', 'warning');
         return;
       }
 
@@ -5533,9 +6159,11 @@
         });
       });
 
+      const vendorName = document.getElementById('batchVendorName')?.value || 'Amazon';
       const newAmazonOrder = {
         id: orderId,
         amazonOrderNum: orderNum,
+        vendor: vendorName,
         orderDate: orderDate,
         status: 'Pending Consolidation',
         freightBoxId: null,
@@ -5547,7 +6175,7 @@
 
       closeModal('batchToAmazonModal');
       clearPreOrderSelection();
-      showToast(`Amazon Order ${orderNum} created with ${newItems.length} lines!`, 'success');
+      showToast(vendorName + ' order ' + orderNum + ' created with ' + newItems.length + ' lines!', 'success');
       
       renderPreOrdersTable();
       renderOrdersTable();
@@ -6323,7 +6951,10 @@
 
       document.getElementById('pickupPreId').value = pre.id;
       document.getElementById('pickupCustomer').textContent = pre.customerName || 'Customer';
-      document.getElementById('pickupTitle').textContent = pre.title || 'Book';
+      const pickupTitles = (pre.items && pre.items.length)
+        ? pre.items.map(i => i.title).join(', ')
+        : (pre.title || 'Book');
+      document.getElementById('pickupTitle').textContent = pickupTitles;
       document.getElementById('pickupPrice').textContent = 'BZ$' + price.toFixed(2);
       document.getElementById('pickupDeposit').textContent = 'BZ$' + deposit.toFixed(2);
       document.getElementById('pickupBalance').textContent = 'BZ$' + balance.toFixed(2);
@@ -6352,36 +6983,41 @@
       const today = new Date().toISOString().split('T')[0];
       const bankAccount = (method === 'ABL' || method === 'BBL') ? method : '';
 
-      // Ensure catalog entry for stock drawdown
-      let cat = (state.catalog || []).find(c =>
-        (pre.isbn && c.isbn && String(c.isbn) === String(pre.isbn)) ||
-        ((c.title || '').toLowerCase() === (pre.title || '').toLowerCase())
-      );
-      if (!cat) {
-        cat = {
-          id: 'CAT-PRE-' + pre.id,
-          isbn: pre.isbn || '',
-          title: pre.title || 'Pre-order book',
-          author: '',
-          genre: 'Pre-Order Pickup',
-          age: 'Adults',
-          format: pre.format || 'Paperback',
-          price: '$' + price.toFixed(2),
-          cost: 0,
-          synopsis: 'Reserved for customer pickup.',
-          imageUrl: '',
-          isPreOrder: false,
-          stock: 1,
-          published: false,
-          location: 'Bookstore'
-        };
-        state.catalog.unshift(cat);
-      } else if ((cat.stock || 0) < 1) {
-        cat.stock = Math.max(1, cat.stock || 0);
-      }
-      if (cat && !cat.isService && cat.stock > 0) {
-        cat.stock = Math.max(0, cat.stock - 1);
-      }
+      // Ensure catalog entries + stock drawdown for every book on this order
+      const pickupLines = (pre.items && pre.items.length) ? pre.items : [{
+        title: pre.title, isbn: pre.isbn, format: pre.format, sellingPrice: price
+      }];
+      pickupLines.forEach((line, idx) => {
+        let cat = (state.catalog || []).find(c =>
+          (line.isbn && c.isbn && String(c.isbn) === String(line.isbn)) ||
+          ((c.title || '').toLowerCase() === (line.title || '').toLowerCase())
+        );
+        if (!cat) {
+          cat = {
+            id: 'CAT-PRE-' + pre.id + '-' + idx,
+            isbn: line.isbn || '',
+            title: line.title || 'Pre-order book',
+            author: '',
+            genre: 'Pre-Order Pickup',
+            age: 'Adults',
+            format: line.format || 'Paperback',
+            price: '$' + (Number(line.sellingPrice) || price).toFixed(2),
+            cost: 0,
+            synopsis: 'Reserved for customer pickup.',
+            imageUrl: '',
+            isPreOrder: false,
+            stock: 1,
+            published: false,
+            location: 'Bookstore'
+          };
+          state.catalog.unshift(cat);
+        } else if ((cat.stock || 0) < 1) {
+          cat.stock = Math.max(1, cat.stock || 0);
+        }
+        if (cat && !cat.isService && cat.stock > 0) {
+          cat.stock = Math.max(0, cat.stock - 1);
+        }
+      });
 
       // Clear deposit (lump sum applied)
       pre.depositAppliedToSale = (pre.depositAppliedToSale || 0) + deposit;
@@ -6391,6 +7027,10 @@
 
       if (!state.sales) state.sales = [];
       const saleId = 'SALE-' + Date.now();
+      const saleItems = ((pre.items && pre.items.length) ? pre.items : [{ title: pre.title, sellingPrice: price }]).map(line => {
+        const unit = Number(line.sellingPrice) || 0;
+        return { title: line.title || pre.title, qty: 1, unitPrice: unit, lineTotal: unit };
+      });
       state.sales.unshift({
         id: saleId,
         date: today,
@@ -6402,7 +7042,7 @@
         amountPaid: balance,
         balanceDue: 0,
         status: 'Paid',
-        items: [{ title: pre.title, qty: 1, unitPrice: price, lineTotal: price }],
+        items: saleItems,
         preOrderId: pre.id,
         payments: balance > 0.01 ? [{ date: today, amount: balance, method, bankAccount }] : []
       });
@@ -6503,36 +7143,204 @@
     }
 
     function openReceiptForSale(sale) {
-      _lastReceiptSale = sale;
+      if (!sale) {
+        showToast('No sale to show on a receipt.', 'warning');
+        return;
+      }
+      // Clone lightly so we can attach phone without mutating ledger
+      const copy = Object.assign({}, sale);
+      if (!copy.customerPhone && copy.preOrderId) {
+        const pre = (state.preOrders || []).find(p => p.id === copy.preOrderId);
+        if (pre) {
+          copy.customerPhone = pre.customerContact || pre.customerPhone || '';
+          copy.customerEmail = pre.customerEmail || '';
+        }
+      }
+      _lastReceiptSale = copy;
       const body = document.getElementById('receiptSlipBody');
-      if (body) body.innerHTML = formatReceiptHtml(sale);
+      if (body) body.innerHTML = formatReceiptHtml(copy);
+      const hint = document.getElementById('receiptActionHint');
+      if (hint) hint.textContent = '';
       document.getElementById('receiptModal')?.classList.remove('hidden');
+      if (typeof wireReceiptButtons === 'function') wireReceiptButtons();
     }
 
     function printCurrentReceipt() {
-      if (!_lastReceiptSale) return;
-      const w = window.open('', '_blank', 'noopener,noreferrer');
-      if (!w) { showToast('Allow pop-ups to print.', 'warning'); return; }
-      w.document.write(`<!DOCTYPE html><html><head><title>Receipt</title>
-        <style>body{font-family:system-ui,sans-serif;padding:20px;max-width:320px;margin:0 auto;color:#0f172a;}
-        @media print{body{padding:8px;}}</style></head><body>
-        ${formatReceiptHtml(_lastReceiptSale)}
-        <script>window.onload=function(){setTimeout(function(){window.print();},150);};<\/script>
-        </body></html>`);
-      w.document.close();
+      try {
+        if (!_lastReceiptSale) {
+          showToast('No receipt loaded. Complete a sale first.', 'warning');
+          return;
+        }
+        const slip = formatReceiptHtml(_lastReceiptSale);
+        // iframe print — works even when pop-ups are blocked (file:// / Safari)
+        let frame = document.getElementById('receiptPrintFrame');
+        if (!frame) {
+          frame = document.createElement('iframe');
+          frame.id = 'receiptPrintFrame';
+          frame.setAttribute('aria-hidden', 'true');
+          frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+          document.body.appendChild(frame);
+        }
+        const doc = frame.contentWindow || frame.contentDocument;
+        const d = doc.document || doc;
+        d.open();
+        d.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Los Bookies Receipt</title>' +
+          '<style>body{font-family:system-ui,-apple-system,sans-serif;padding:24px;max-width:340px;margin:0 auto;color:#0f172a;font-size:13px;}' +
+          '@media print{body{padding:8px;}}</style></head><body>' + slip + '</body></html>');
+        d.close();
+        setTimeout(function () {
+          try {
+            frame.contentWindow.focus();
+            frame.contentWindow.print();
+            showToast('Print dialog opened.', 'success');
+          } catch (e) {
+            // Fallback: popup window
+            const w = window.open('', '_blank');
+            if (!w) {
+              showToast('Print blocked. Use Copy receipt text, or allow pop-ups.', 'warning');
+              const hint = document.getElementById('receiptActionHint');
+              if (hint) hint.textContent = 'Print blocked by the browser. Try Copy, or allow pop-ups for this file.';
+              return;
+            }
+            try { w.opener = null; } catch (x) {}
+            w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt</title></head><body>' + slip +
+              '<script>window.onload=function(){setTimeout(function(){window.print();},200);};' + '<' + '/script></body></html>');
+            w.document.close();
+          }
+        }, 250);
+      } catch (err) {
+        console.error(err);
+        showToast('Could not print: ' + (err && err.message ? err.message : 'error'), 'error');
+      }
     }
 
     function emailCurrentReceipt() {
-      if (!_lastReceiptSale) return;
-      const subject = encodeURIComponent('Los Bookies receipt ' + (_lastReceiptSale.id || ''));
-      const body = encodeURIComponent(formatReceiptText(_lastReceiptSale));
-      window.location.href = `mailto:?subject=${subject}&body=${body}`;
+      try {
+        if (!_lastReceiptSale) {
+          showToast('No receipt loaded. Complete a sale first.', 'warning');
+          return;
+        }
+        const sale = _lastReceiptSale;
+        const subject = 'Los Bookies receipt ' + (sale.id || '');
+        const body = formatReceiptText(sale);
+        let to = sale.customerEmail || '';
+        if (!to && sale.preOrderId) {
+          const pre = (state.preOrders || []).find(function (p) { return p.id === sale.preOrderId; });
+          if (pre && pre.customerEmail) to = pre.customerEmail;
+        }
+        const href = 'mailto:' + encodeURIComponent(to) +
+          '?subject=' + encodeURIComponent(subject) +
+          '&body=' + encodeURIComponent(body);
+        const a = document.createElement('a');
+        a.href = href;
+        a.target = '_self';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        // Always offer copy as reliable fallback
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(body).catch(function () {});
+        }
+        showToast('Opening email… Receipt text also copied if clipboard allows.', 'info');
+        const hint = document.getElementById('receiptActionHint');
+        if (hint) hint.textContent = 'If no email app opens, use Copy receipt text and paste into Gmail / WhatsApp yourself.';
+      } catch (err) {
+        console.error(err);
+        showToast('Could not open email.', 'error');
+      }
     }
 
     function whatsappCurrentReceipt() {
-      if (!_lastReceiptSale) return;
-      const text = encodeURIComponent(formatReceiptText(_lastReceiptSale));
-      window.open('https://wa.me/?text=' + text, '_blank', 'noopener,noreferrer');
+      try {
+        if (!_lastReceiptSale) {
+          showToast('No receipt loaded. Complete a sale first.', 'warning');
+          return;
+        }
+        const sale = _lastReceiptSale;
+        const body = formatReceiptText(sale);
+        let phone = sale.customerPhone || '';
+        if (!phone && sale.preOrderId) {
+          const pre = (state.preOrders || []).find(function (p) { return p.id === sale.preOrderId; });
+          if (pre) phone = pre.customerContact || pre.customerPhone || '';
+        }
+        let digits = String(phone || '').replace(/\D/g, '');
+        if (digits.length === 7) digits = '501' + digits;
+        if (digits.length === 8 && digits.charAt(0) === '0') digits = '501' + digits.slice(1);
+        const url = digits.length >= 10
+          ? ('https://wa.me/' + digits + '?text=' + encodeURIComponent(body))
+          : ('https://wa.me/?text=' + encodeURIComponent(body));
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        showToast(digits.length >= 10 ? 'Opening WhatsApp for the customer…' : 'Opening WhatsApp — pick the contact.', 'info');
+      } catch (err) {
+        console.error(err);
+        showToast('Could not open WhatsApp.', 'error');
+      }
+    }
+
+    function copyCurrentReceipt() {
+      try {
+        if (!_lastReceiptSale) {
+          showToast('No receipt loaded.', 'warning');
+          return;
+        }
+        const text = formatReceiptText(_lastReceiptSale);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function () {
+            showToast('Receipt copied. Paste into email or WhatsApp.', 'success');
+          }).catch(function () {
+            fallbackCopyReceipt(text);
+          });
+        } else {
+          fallbackCopyReceipt(text);
+        }
+      } catch (err) {
+        console.error(err);
+        showToast('Could not copy.', 'error');
+      }
+    }
+
+    function fallbackCopyReceipt(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try {
+        document.execCommand('copy');
+        showToast('Receipt copied. Paste into email or WhatsApp.', 'success');
+      } catch (e) {
+        prompt('Copy this receipt text:', text);
+      }
+      ta.remove();
+    }
+
+    function wireReceiptButtons() {
+      const p = document.getElementById('btnReceiptPrint');
+      const e = document.getElementById('btnReceiptEmail');
+      const w = document.getElementById('btnReceiptWa');
+      const c = document.getElementById('btnReceiptCopy');
+      if (p && !p._wired) { p._wired = true; p.addEventListener('click', function (ev) { ev.preventDefault(); printCurrentReceipt(); }); }
+      if (e && !e._wired) { e._wired = true; e.addEventListener('click', function (ev) { ev.preventDefault(); emailCurrentReceipt(); }); }
+      if (w && !w._wired) { w._wired = true; w.addEventListener('click', function (ev) { ev.preventDefault(); whatsappCurrentReceipt(); }); }
+      if (c && !c._wired) { c._wired = true; c.addEventListener('click', function (ev) { ev.preventDefault(); copyCurrentReceipt(); }); }
+    }
+    // Expose on window so inline handlers / late DOM always find them
+    window.printCurrentReceipt = printCurrentReceipt;
+    window.emailCurrentReceipt = emailCurrentReceipt;
+    window.whatsappCurrentReceipt = whatsappCurrentReceipt;
+    window.copyCurrentReceipt = copyCurrentReceipt;
+    window.openReceiptForSale = openReceiptForSale;
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', wireReceiptButtons);
+    } else {
+      wireReceiptButtons();
     }
 
     // —— Refunds / returns ——
@@ -6754,9 +7562,9 @@
       function bucket(ym) {
         if (!map[ym]) {
           map[ym] = {
-            gross: 0, deposits: 0, depositsApplied: 0, refunds: 0,
+            gross: 0, bookGross: 0, serviceGross: 0, deposits: 0, depositsApplied: 0, refunds: 0,
             cash: 0, abl: 0, bbl: 0, cogs: 0,
-            sales: [], refundRows: [], depositRows: []
+            sales: [], refundRows: [], depositRows: [], journalRows: []
           };
         }
         return map[ym];
@@ -6773,14 +7581,24 @@
         } else {
           bucketPayMonth(s.paymentMethod, s.amountPaid, s.bankAccount, b);
         }
+        let saleBook = 0, saleSvc = 0;
         (s.items || []).forEach(it => {
           const cat = (state.catalog || []).find(c =>
+            c.id === it.id ||
             (c.title || '').toLowerCase() === (it.title || '').toLowerCase()
           );
-          if (cat && cat.isService) return;
+          const line = (Number(it.unitPrice) || 0) * (it.qty || 1);
+          if (cat && cat.isService) {
+            saleSvc += line;
+            return;
+          }
+          saleBook += line;
           const unitCost = cat && typeof cat.cost === 'number' ? cat.cost : 0;
           b.cogs += unitCost * (it.qty || 1);
         });
+        if (!(s.items || []).length) saleBook = Number(s.subtotal) || 0;
+        b.bookGross += saleBook;
+        b.serviceGross += saleSvc;
       });
 
       (state.preOrders || []).forEach(p => {
@@ -6815,7 +7633,103 @@
         b.refundRows.push(r);
       });
 
+      // Manual journal / correction entries — reclass banks & other GLs so monthly summary reflects them
+      function journalGlKey(label) {
+        const s = (label || '').toLowerCase();
+        if (s.includes('cash')) return 'cash';
+        if (s.includes('abl')) return 'abl';
+        if (s.includes('bbl')) return 'bbl';
+        if (s.includes('customer deposit')) return 'deposits';
+        if (s.includes('book sales')) return 'bookGross';
+        if (s.includes('other sales')) return 'serviceGross';
+        if (s.includes('gst')) return 'gstAdj';
+        if (s.includes('cogs')) return 'cogs';
+        if (s.includes('inventory')) return 'cogs'; // inventory out moves with cogs in this summary
+        return null;
+      }
+      (state.confirmedJournals || []).forEach(j => {
+        if (!j || j.type !== 'Journal / correction') return;
+        const snap = j.snapshot || {};
+        const amount = Number(snap.amount) || 0;
+        if (amount <= 0) return;
+        const ym = monthKey(j.date);
+        const b = bucket(ym);
+        if (!b.journalRows) b.journalRows = [];
+        b.journalRows.push(j);
+        const debKey = journalGlKey(snap.debit);
+        const creKey = journalGlKey(snap.credit);
+        // Debit increases the account in our presentation totals for banks/assets;
+        // Credit decreases source (e.g. cash out when depositing to ABL)
+        if (debKey === 'cash' || debKey === 'abl' || debKey === 'bbl') b[debKey] = (b[debKey] || 0) + amount;
+        else if (debKey === 'deposits') b.deposits = (b.deposits || 0) + amount;
+        else if (debKey === 'bookGross') b.bookGross = (b.bookGross || 0) + amount;
+        else if (debKey === 'serviceGross') b.serviceGross = (b.serviceGross || 0) + amount;
+        else if (debKey === 'cogs') b.cogs = (b.cogs || 0) + amount;
+
+        if (creKey === 'cash' || creKey === 'abl' || creKey === 'bbl') b[creKey] = (b[creKey] || 0) - amount;
+        else if (creKey === 'deposits') b.deposits = (b.deposits || 0) - amount;
+        else if (creKey === 'bookGross') b.bookGross = (b.bookGross || 0) - amount;
+        else if (creKey === 'serviceGross') b.serviceGross = (b.serviceGross || 0) - amount;
+        else if (creKey === 'cogs') b.cogs = (b.cogs || 0) - amount;
+      });
+
       return map;
+    }
+
+    let glDateRangeMode = 'this'; // this | 3m | all | custom
+    let glCustomFrom = null;
+    let glCustomTo = null;
+
+    function setGlDateRange(mode) {
+      glDateRangeMode = mode || 'this';
+      const wrap = document.getElementById('glCustomDateWrap');
+      if (wrap) wrap.classList.toggle('hidden', glDateRangeMode !== 'custom');
+      const map = {
+        this: 'glRangeThisMonth',
+        '3m': 'glRange3m',
+        all: 'glRangeAll',
+        custom: 'glRangeCustom'
+      };
+      Object.keys(map).forEach(k => {
+        const b = document.getElementById(map[k]);
+        if (!b) return;
+        const on = k === glDateRangeMode;
+        b.className = on
+          ? 'px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-600 text-white'
+          : 'px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white border border-slate-300 text-slate-700 hover:border-indigo-500';
+      });
+      if (mode !== 'custom') renderMonthlyGlSummary();
+    }
+
+    function applyGlCustomRange() {
+      glCustomFrom = document.getElementById('glCustomFrom')?.value || null;
+      glCustomTo = document.getElementById('glCustomTo')?.value || null;
+      if (!glCustomFrom || !glCustomTo) {
+        showToast('Pick both From and To dates.', 'warning');
+        return;
+      }
+      glDateRangeMode = 'custom';
+      renderMonthlyGlSummary();
+    }
+
+    function monthsInGlRange(allMonths) {
+      const sorted = (allMonths || []).slice().sort();
+      if (!sorted.length) return [];
+      const now = new Date();
+      const thisYm = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+      if (glDateRangeMode === 'all') return sorted;
+      if (glDateRangeMode === 'this') return sorted.filter(ym => ym === thisYm);
+      if (glDateRangeMode === '3m') {
+        const cut = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+        const cutYm = cut.getFullYear() + '-' + String(cut.getMonth() + 1).padStart(2, '0');
+        return sorted.filter(ym => ym >= cutYm);
+      }
+      if (glDateRangeMode === 'custom' && glCustomFrom && glCustomTo) {
+        const fromYm = glCustomFrom.slice(0, 7);
+        const toYm = glCustomTo.slice(0, 7);
+        return sorted.filter(ym => ym >= fromYm && ym <= toYm);
+      }
+      return sorted;
     }
 
     function renderMonthlyGlSummary() {
@@ -6823,20 +7737,21 @@
       const body = document.getElementById('monthlyGlBody');
       if (!body) return;
       const map = buildMonthlyGlMap();
-      const months = Object.keys(map).sort(); // chronological left → right
+      const months = monthsInGlRange(Object.keys(map));
       if (!months.length) {
         if (head) head.innerHTML = '';
-        body.innerHTML = '<tr><td class="py-6 text-center text-stone-400 italic">No activity yet.</td></tr>';
+        body.innerHTML = '<tr><td class="py-6 text-center text-stone-400 italic">No activity in this range.</td></tr>';
         return;
       }
 
-      // GLs as rows, months as columns
       const accounts = [
         { key: 'cash', label: 'Cash (drawer)', side: 'bank' },
         { key: 'abl', label: 'ABL (bank)', side: 'bank' },
         { key: 'bbl', label: 'BBL (bank)', side: 'bank' },
-        { key: 'gross', label: 'Gross sales (incl. GST)', side: 'income' },
-        { key: 'salesEx', label: 'Sales (excl. GST)', side: 'income' },
+        { key: 'bookGross', label: 'Book sales (incl. GST)', side: 'income' },
+        { key: 'serviceGross', label: 'Other sales (incl. GST)', side: 'income' },
+        { key: 'bookSalesEx', label: 'Book sales (excl. GST)', side: 'income' },
+        { key: 'serviceSalesEx', label: 'Other sales (excl. GST)', side: 'income' },
         { key: 'gst', label: 'GST Payable', side: 'liability' },
         { key: 'deposits', label: 'Customer Deposits (new)', side: 'liability' },
         { key: 'depositsApplied', label: 'Customer Deposits (applied)', side: 'liability' },
@@ -6857,14 +7772,13 @@
         let total = 0;
         const cells = months.map(ym => {
           const b = map[ym];
-          let v = 0;
-          if (acc.key === 'salesEx') v = (b.gross || 0) / 1.125;
-          else if (acc.key === 'gst') v = (b.gross || 0) - (b.gross || 0) / 1.125;
-          else if (acc.key === 'inventory') v = b.cogs || 0;
-          else v = b[acc.key] || 0;
+          let v = glCellValue(b, acc.key);
           total += v;
-          const cls = v < -0.005 ? 'text-rose-700' : (v > 0.005 ? '' : 'text-stone-400');
-          return `<td class="py-1.5 px-2 text-right font-mono ${cls}">${Math.abs(v) < 0.005 ? '—' : 'BZ$' + v.toFixed(2)}</td>`;
+          const cls = v < -0.005 ? 'text-rose-700' : (v > 0.005 ? 'cursor-pointer hover:bg-indigo-50 hover:text-indigo-800' : 'text-stone-400');
+          const click = Math.abs(v) >= 0.005
+            ? `onclick="openGlCellDetail('${ym}','${acc.key}','${acc.label.replace(/'/g, "\\'")}')" title="See transactions"`
+            : '';
+          return `<td class="py-1.5 px-2 text-right font-mono ${cls}" ${click}>${Math.abs(v) < 0.005 ? '—' : 'BZ$' + v.toFixed(2)}</td>`;
         }).join('');
         const totalCls = total < -0.005 ? 'text-rose-700' : '';
         return `<tr class="hover:bg-slate-50">
@@ -6875,18 +7789,173 @@
       }).join('');
     }
 
+    function glCellValue(b, key) {
+      if (!b) return 0;
+      if (key === 'bookSalesEx') return (b.bookGross || 0) / 1.125;
+      if (key === 'serviceSalesEx') return (b.serviceGross || 0) / 1.125;
+      if (key === 'salesEx') return ((b.bookGross || 0) + (b.serviceGross || 0) || (b.gross || 0)) / 1.125;
+      if (key === 'gst') {
+        const g = (b.bookGross || 0) + (b.serviceGross || 0) || (b.gross || 0);
+        return g - g / 1.125;
+      }
+      if (key === 'inventory') return b.cogs || 0;
+      if (key === 'bookGross') return b.bookGross || 0;
+      if (key === 'serviceGross') return b.serviceGross || 0;
+      return b[key] || 0;
+    }
+
+    function openGlCellDetail(ym, key, label) {
+      const map = buildMonthlyGlMap();
+      const b = map[ym];
+      if (!b) return;
+      document.getElementById('glMonthTitle').textContent = `${label} · ${monthLabel(ym)}`;
+      const v = glCellValue(b, key);
+      let html = `<div class="mb-3 p-3 rounded-xl bg-slate-50 border border-slate-200 flex justify-between items-center">
+        <span class="text-slate-600 text-xs">Total for this cell</span>
+        <span class="font-mono font-bold text-sm">BZ$${v.toFixed(2)}</span>
+      </div>`;
+
+      const isBank = ['cash','abl','bbl'].includes(key);
+      const isSales = ['gross','bookGross','serviceGross','bookSalesEx','serviceSalesEx','salesEx','gst'].includes(key);
+      const isDeposit = key === 'deposits' || key === 'depositsApplied';
+      const isRefund = key === 'refunds';
+      const isCogs = key === 'cogs' || key === 'inventory';
+
+      if (isSales) {
+        let sales = b.sales || [];
+        if (key === 'bookGross' || key === 'bookSalesEx') {
+          sales = sales.filter(s => {
+            const items = s.items || [];
+            if (!items.length) return true;
+            return items.some(it => {
+              const cat = (state.catalog || []).find(c => (c.title || '').toLowerCase() === (it.title || '').toLowerCase() || c.id === it.id);
+              return !(cat && cat.isService);
+            });
+          });
+        } else if (key === 'serviceGross' || key === 'serviceSalesEx') {
+          sales = sales.filter(s => (s.items || []).some(it => {
+            const cat = (state.catalog || []).find(c => (c.title || '').toLowerCase() === (it.title || '').toLowerCase() || c.id === it.id);
+            return cat && cat.isService;
+          }));
+        }
+        html += `<div class="font-bold text-slate-900 mb-1">Sales lines</div>`;
+        if (!sales.length) html += `<p class="text-stone-400 italic">None</p>`;
+        else {
+          html += `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="w-full text-[11px]"><thead><tr class="bg-slate-50"><th class="text-left py-1.5 px-2">Date</th><th class="text-left py-1.5 px-2">Customer</th><th class="text-left py-1.5 px-2">Items</th><th class="text-left py-1.5 px-2">Pay</th><th class="text-right py-1.5 px-2">Gross</th></tr></thead><tbody>`;
+          sales.forEach(s => {
+            const items = (s.items || []).map(i => i.title).filter(Boolean).join(', ') || '—';
+            html += `<tr class="border-t border-slate-100"><td class="py-1.5 px-2 font-mono">${s.date||''}</td><td class="py-1.5 px-2">${s.customerName||''}</td><td class="py-1.5 px-2 max-w-[140px] truncate">${items}</td><td class="py-1.5 px-2">${s.paymentMethod||''}</td><td class="py-1.5 px-2 text-right font-mono">BZ$${(Number(s.subtotal)||0).toFixed(2)}</td></tr>`;
+          });
+          html += `</tbody></table></div>`;
+        }
+      } else if (isDeposit) {
+        html += `<div class="font-bold text-slate-900 mb-1">Deposits</div>`;
+        const rows = b.depositRows || [];
+        if (!rows.length) html += `<p class="text-stone-400 italic">None</p>`;
+        else {
+          html += `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="w-full text-[11px]"><thead><tr class="bg-slate-50"><th class="text-left py-1.5 px-2">Date</th><th class="text-left py-1.5 px-2">Customer</th><th class="text-left py-1.5 px-2">Book</th><th class="text-right py-1.5 px-2">Amount</th></tr></thead><tbody>`;
+          rows.forEach(d => {
+            html += `<tr class="border-t border-slate-100"><td class="py-1.5 px-2 font-mono">${d.date||''}</td><td class="py-1.5 px-2">${d.customerName||''}</td><td class="py-1.5 px-2">${d.title||''}</td><td class="py-1.5 px-2 text-right font-mono">BZ$${(Number(d.amount)||0).toFixed(2)}</td></tr>`;
+          });
+          html += `</tbody></table></div>`;
+        }
+        if (key === 'depositsApplied') {
+          const applied = (b.sales || []).filter(s => Number(s.depositApplied) > 0);
+          if (applied.length) {
+            html += `<div class="font-bold text-slate-900 mb-1 mt-3">Deposits applied on sales</div>`;
+            html += `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="w-full text-[11px]"><thead><tr class="bg-slate-50"><th class="text-left py-1.5 px-2">Date</th><th class="text-left py-1.5 px-2">Customer</th><th class="text-right py-1.5 px-2">Applied</th></tr></thead><tbody>`;
+            applied.forEach(s => {
+              html += `<tr class="border-t border-slate-100"><td class="py-1.5 px-2 font-mono">${s.date||''}</td><td class="py-1.5 px-2">${s.customerName||''}</td><td class="py-1.5 px-2 text-right font-mono">BZ$${(Number(s.depositApplied)||0).toFixed(2)}</td></tr>`;
+            });
+            html += `</tbody></table></div>`;
+          }
+        }
+      } else if (isRefund) {
+        html += `<div class="font-bold text-slate-900 mb-1">Refunds</div>`;
+        const rows = b.refundRows || [];
+        if (!rows.length) html += `<p class="text-stone-400 italic">None</p>`;
+        else {
+          html += `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="w-full text-[11px]"><thead><tr class="bg-slate-50"><th class="text-left py-1.5 px-2">Date</th><th class="text-left py-1.5 px-2">Type</th><th class="text-left py-1.5 px-2">Customer</th><th class="text-right py-1.5 px-2">Amount</th></tr></thead><tbody>`;
+          rows.forEach(r => {
+            html += `<tr class="border-t border-slate-100"><td class="py-1.5 px-2 font-mono">${r.date||''}</td><td class="py-1.5 px-2">${r.type||''}</td><td class="py-1.5 px-2">${r.customerName||''}</td><td class="py-1.5 px-2 text-right font-mono text-rose-700">BZ$${(Number(r.amount)||0).toFixed(2)}</td></tr>`;
+          });
+          html += `</tbody></table></div>`;
+        }
+      } else if (isCogs) {
+        html += `<div class="font-bold text-slate-900 mb-1">COGS from book sales</div>`;
+        const sales = (b.sales || []).filter(s => (s.items || []).some(it => {
+          const cat = (state.catalog || []).find(c => (c.title || '').toLowerCase() === (it.title || '').toLowerCase() || c.id === it.id);
+          return !(cat && cat.isService);
+        }));
+        if (!sales.length) html += `<p class="text-stone-400 italic">None</p>`;
+        else {
+          html += `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="w-full text-[11px]"><thead><tr class="bg-slate-50"><th class="text-left py-1.5 px-2">Date</th><th class="text-left py-1.5 px-2">Items</th><th class="text-right py-1.5 px-2">Est. COGS</th></tr></thead><tbody>`;
+          sales.forEach(s => {
+            let cogsLine = 0;
+            const titles = [];
+            (s.items || []).forEach(it => {
+              const cat = (state.catalog || []).find(c => (c.title || '').toLowerCase() === (it.title || '').toLowerCase() || c.id === it.id);
+              if (cat && cat.isService) return;
+              titles.push(it.title);
+              cogsLine += (cat && typeof cat.cost === 'number' ? cat.cost : 0) * (it.qty || 1);
+            });
+            html += `<tr class="border-t border-slate-100"><td class="py-1.5 px-2 font-mono">${s.date||''}</td><td class="py-1.5 px-2">${titles.join(', ')}</td><td class="py-1.5 px-2 text-right font-mono">BZ$${cogsLine.toFixed(2)}</td></tr>`;
+          });
+          html += `</tbody></table></div>`;
+        }
+      } else if (isBank) {
+        html += `<div class="font-bold text-slate-900 mb-1">Money into ${label}</div>`;
+        const lines = [];
+        (b.sales || []).forEach(s => {
+          const pays = (s.payments && s.payments.length) ? s.payments : [{ method: s.paymentMethod, amount: s.amountPaid, bankAccount: s.bankAccount }];
+          pays.forEach(pay => {
+            const m = (pay.method || '').toLowerCase();
+            const bank = (pay.bankAccount || s.bankAccount || '').toUpperCase();
+            let bucket = 'cash';
+            if (m.includes('abl') || bank === 'ABL') bucket = 'abl';
+            else if (m.includes('bbl') || bank === 'BBL') bucket = 'bbl';
+            else if (m.includes('transfer') || m.includes('online')) bucket = bank === 'BBL' ? 'bbl' : 'abl';
+            if (bucket === key) {
+              lines.push({ date: s.date, who: s.customerName || 'Sale', note: pay.method || s.paymentMethod, amount: Number(pay.amount) || 0 });
+            }
+          });
+        });
+        (b.depositRows || []).forEach(d => {
+          // deposits without method detail — show under all bank drills loosely via open month
+          lines.push({ date: d.date, who: d.customerName, note: 'Deposit · ' + (d.title || ''), amount: Number(d.amount) || 0, soft: true });
+        });
+        // For bank cells, only show sales payments matched; deposits listed with soft flag
+        const matched = lines.filter(l => !l.soft || key === 'cash');
+        if (!matched.length) html += `<p class="text-stone-400 italic">No direct payment lines tagged to this account. Open the full month for all activity.</p>
+          <button type="button" onclick="openGlMonthDetail('${ym}')" class="mt-2 text-indigo-700 font-semibold text-xs hover:underline">View full month</button>`;
+        else {
+          html += `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="w-full text-[11px]"><thead><tr class="bg-slate-50"><th class="text-left py-1.5 px-2">Date</th><th class="text-left py-1.5 px-2">Who</th><th class="text-left py-1.5 px-2">Method</th><th class="text-right py-1.5 px-2">Amount</th></tr></thead><tbody>`;
+          matched.forEach(l => {
+            html += `<tr class="border-t border-slate-100"><td class="py-1.5 px-2 font-mono">${l.date||''}</td><td class="py-1.5 px-2">${l.who||''}</td><td class="py-1.5 px-2">${l.note||''}</td><td class="py-1.5 px-2 text-right font-mono">BZ$${(l.amount||0).toFixed(2)}</td></tr>`;
+          });
+          html += `</tbody></table></div>`;
+        }
+      } else {
+        openGlMonthDetail(ym);
+        return;
+      }
+
+      document.getElementById('glMonthBody').innerHTML = html;
+      document.getElementById('glMonthDetailModal')?.classList.remove('hidden');
+    }
+
     function openGlMonthDetail(ym) {
       const map = buildMonthlyGlMap();
       const b = map[ym];
       if (!b) return;
       document.getElementById('glMonthTitle').textContent = monthLabel(ym);
-      const salesEx = (b.gross || 0) / 1.125;
-      const gst = (b.gross || 0) - salesEx;
+      const salesEx = ((b.bookGross || 0) + (b.serviceGross || 0) || (b.gross || 0)) / 1.125;
+      const gst = ((b.bookGross || 0) + (b.serviceGross || 0) || (b.gross || 0)) - salesEx;
       let html = `<div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3 text-[10px]">
         <div class="rounded-lg border border-slate-200 p-2"><div class="text-slate-500">Cash</div><div class="font-mono font-bold">BZ$${(b.cash||0).toFixed(2)}</div></div>
         <div class="rounded-lg border border-slate-200 p-2"><div class="text-slate-500">ABL</div><div class="font-mono font-bold">BZ$${(b.abl||0).toFixed(2)}</div></div>
         <div class="rounded-lg border border-slate-200 p-2"><div class="text-slate-500">BBL</div><div class="font-mono font-bold">BZ$${(b.bbl||0).toFixed(2)}</div></div>
-        <div class="rounded-lg border border-slate-200 p-2"><div class="text-slate-500">Gross / GST</div><div class="font-mono font-bold">BZ$${(b.gross||0).toFixed(2)} / ${gst.toFixed(2)}</div></div>
+        <div class="rounded-lg border border-slate-200 p-2"><div class="text-slate-500">Gross / GST</div><div class="font-mono font-bold">BZ$${((b.bookGross||0)+(b.serviceGross||0)||(b.gross||0)).toFixed(2)} / ${gst.toFixed(2)}</div></div>
       </div>`;
       html += `<div class="font-bold text-slate-900 mb-1">Sales</div>`;
       if (!b.sales.length) html += `<p class="text-stone-400 italic mb-3">None</p>`;
@@ -6907,16 +7976,93 @@
         html += `</tbody></table></div>`;
       }
       html += `<div class="font-bold text-slate-900 mb-1">Refunds</div>`;
-      if (!b.refundRows.length) html += `<p class="text-stone-400 italic">None</p>`;
+      if (!b.refundRows.length) html += `<p class="text-stone-400 italic mb-3">None</p>`;
       else {
-        html += `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="w-full text-[11px]"><thead><tr class="bg-slate-50"><th class="text-left py-1.5 px-2">Date</th><th class="text-left py-1.5 px-2">Type</th><th class="text-left py-1.5 px-2">Customer</th><th class="text-right py-1.5 px-2">Amount</th></tr></thead><tbody>`;
+        html += `<div class="border border-slate-200 rounded-xl overflow-hidden mb-3"><table class="w-full text-[11px]"><thead><tr class="bg-slate-50"><th class="text-left py-1.5 px-2">Date</th><th class="text-left py-1.5 px-2">Type</th><th class="text-left py-1.5 px-2">Customer</th><th class="text-right py-1.5 px-2">Amount</th></tr></thead><tbody>`;
         b.refundRows.forEach(r => {
           html += `<tr class="border-t border-slate-100"><td class="py-1.5 px-2 font-mono">${r.date}</td><td class="py-1.5 px-2">${r.type}</td><td class="py-1.5 px-2">${r.customerName||''}</td><td class="py-1.5 px-2 text-right font-mono text-rose-700">BZ$${(Number(r.amount)||0).toFixed(2)}</td></tr>`;
         });
         html += `</tbody></table></div>`;
       }
+      html += `<div class="font-bold text-slate-900 mb-1">Journal / corrections</div>`;
+      const jrows = b.journalRows || [];
+      if (!jrows.length) html += `<p class="text-stone-400 italic">None</p>`;
+      else {
+        html += `<div class="border border-slate-200 rounded-xl overflow-hidden"><table class="w-full text-[11px]"><thead><tr class="bg-slate-50"><th class="text-left py-1.5 px-2">Date</th><th class="text-left py-1.5 px-2">Debit</th><th class="text-left py-1.5 px-2">Credit</th><th class="text-right py-1.5 px-2">Amount</th></tr></thead><tbody>`;
+        jrows.forEach(j => {
+          const s = j.snapshot || {};
+          html += `<tr class="border-t border-slate-100"><td class="py-1.5 px-2 font-mono">${j.date||''}</td><td class="py-1.5 px-2">${s.debit||''}</td><td class="py-1.5 px-2">${s.credit||''}</td><td class="py-1.5 px-2 text-right font-mono">BZ$${(Number(s.amount)||0).toFixed(2)}</td></tr>`;
+        });
+        html += `</tbody></table></div>`;
+      }
       document.getElementById('glMonthBody').innerHTML = html;
       document.getElementById('glMonthDetailModal')?.classList.remove('hidden');
+    }
+
+
+    function openManualJournalModal() {
+      const d = document.getElementById('mjDate');
+      if (d) d.value = new Date().toISOString().split('T')[0];
+      const m = document.getElementById('mjMemo'); if (m) m.value = '';
+      const a = document.getElementById('mjAmount'); if (a) a.value = '0.00';
+      const t = document.getElementById('mjTemplate'); if (t) t.value = '';
+      document.getElementById('manualJournalModal')?.classList.remove('hidden');
+    }
+
+    function applyMjTemplate() {
+      const t = document.getElementById('mjTemplate')?.value || '';
+      const deb = document.getElementById('mjDebit');
+      const cre = document.getElementById('mjCredit');
+      const memo = document.getElementById('mjMemo');
+      if (!deb || !cre) return;
+      const map = {
+        cash_to_abl: ['ABL (bank)', 'Cash (drawer)', 'Cash drawer deposited to ABL'],
+        cash_to_bbl: ['BBL (bank)', 'Cash (drawer)', 'Cash drawer deposited to BBL'],
+        abl_to_bbl: ['BBL (bank)', 'ABL (bank)', 'Reclass transfer ABL → BBL'],
+        bbl_to_abl: ['ABL (bank)', 'BBL (bank)', 'Reclass transfer BBL → ABL'],
+        dep_abl_to_bbl: ['BBL (bank)', 'ABL (bank)', 'Deposit was logged ABL; correct to BBL'],
+        dep_bbl_to_abl: ['ABL (bank)', 'BBL (bank)', 'Deposit was logged BBL; correct to ABL']
+      };
+      if (map[t]) {
+        deb.value = map[t][0]; // debit destination (e.g. ABL)
+        cre.value = map[t][1]; // credit source (e.g. Cash)
+        if (memo) memo.value = map[t][2];
+      }
+    }
+
+    function saveManualJournal() {
+      const date = document.getElementById('mjDate')?.value || new Date().toISOString().split('T')[0];
+      const memo = (document.getElementById('mjMemo')?.value || '').trim() || 'Manual correction';
+      const debit = document.getElementById('mjDebit')?.value || '';
+      const credit = document.getElementById('mjCredit')?.value || '';
+      const amount = parseFloat(document.getElementById('mjAmount')?.value) || 0;
+      if (amount <= 0) { showToast('Enter an amount greater than zero.', 'warning'); return; }
+      if (debit === credit) { showToast('Debit and credit accounts must differ.', 'warning'); return; }
+      if (!state.confirmedJournals) state.confirmedJournals = [];
+      const detailHtml = `<div class="text-xs space-y-2">
+        <p class="text-slate-600">${memo}</p>
+        <table class="w-full text-[11px] border border-slate-200 rounded-xl overflow-hidden">
+          <thead><tr class="bg-slate-50"><th class="text-left py-1.5 px-2">Account</th><th class="text-right py-1.5 px-2">Debit</th><th class="text-right py-1.5 px-2">Credit</th></tr></thead>
+          <tbody>
+            <tr class="border-t"><td class="py-1.5 px-2">${debit}</td><td class="py-1.5 px-2 text-right font-mono">BZ$${amount.toFixed(2)}</td><td class="py-1.5 px-2 text-right text-stone-400">—</td></tr>
+            <tr class="border-t"><td class="py-1.5 px-2">${credit}</td><td class="py-1.5 px-2 text-right text-stone-400">—</td><td class="py-1.5 px-2 text-right font-mono">BZ$${amount.toFixed(2)}</td></tr>
+          </tbody>
+        </table>
+        <p class="text-[10px] text-slate-500">Post the same two lines in QuickBooks, then keep this as your audit trail.</p>
+      </div>`;
+      state.confirmedJournals.unshift({
+        key: `${date}|JE|${Date.now()}`,
+        date,
+        type: 'Journal / correction',
+        memo: `${debit} Dr / ${credit} Cr · BZ$${amount.toFixed(2)} — ${memo}`,
+        detailHtml,
+        snapshot: { debit, credit, amount, memo },
+        confirmedAt: new Date().toLocaleString()
+      });
+      closeModal('manualJournalModal');
+      showToast('Journal saved under History. Mirror it in QBO.', 'success');
+      if (typeof renderRegisterHistory === 'function') renderRegisterHistory();
+      if (typeof saveAppState === 'function') saveAppState(false);
     }
 
 
@@ -8189,7 +9335,7 @@
     function openAddServiceModal() {
       const n = document.getElementById('svcName'); if (n) n.value = '';
       const p = document.getElementById('svcPrice'); if (p) p.value = '5.00';
-      const c = document.getElementById('svcCategory'); if (c) c.value = 'Gift wrap';
+      const c = document.getElementById('svcCategory'); if (c) c.value = 'Shipping / delivery';
       const notes = document.getElementById('svcNotes'); if (notes) notes.value = '';
       document.getElementById('addServiceModal')?.classList.remove('hidden');
       n?.focus();
@@ -8345,7 +9491,25 @@
     function renderOwlPublicShelves() {
       const host = document.getElementById('owlPublicShelvesHost');
       if (!host) return;
-      const books = (state.catalog || []).filter(c => (c.location || '') === 'Library');
+      applyOwlPublicCopyToDom();
+      const q = (document.getElementById('owlPublicSearch')?.value || '').trim().toLowerCase();
+      const ageF = (document.getElementById('owlPublicAgeFilter')?.value || '').trim();
+      let books = (state.catalog || []).filter(c => (c.location || '') === 'Library' || (c.location || '') === 'OWL');
+      if (ageF) {
+        books = books.filter(b => {
+          let age = (b.ageCategory || b.age || 'Adult').trim();
+          if (/^adults?$/i.test(age)) age = 'Adult';
+          if (/kid|children/i.test(age)) age = 'Kids';
+          if (/middle/i.test(age)) age = 'Middle Grade';
+          if (/young|^ya$/i.test(age)) age = 'Young Adult';
+          return age === ageF;
+        });
+      }
+      if (q) {
+        books = books.filter(b =>
+          ((b.title || '') + ' ' + (b.author || '') + ' ' + (b.genre || '') + ' ' + (b.synopsis || '')).toLowerCase().includes(q)
+        );
+      }
       if (!books.length) {
         host.innerHTML = '<div style="background:#FFFDF9;border:1px solid #E8DCC5;border-radius:16px;padding:28px;text-align:center;color:#7A5B45;">' +
           '<div style="font-weight:700;color:#34180A;font-size:16px;margin-bottom:6px;">Community shelves</div>' +
@@ -8609,7 +9773,7 @@
 
       if (select) {
         const prev = select.value;
-        select.innerHTML = '<option value="">Link to Amazon Order…</option>';
+        select.innerHTML = '<option value="">Link to vendor order…</option>';
         // Only orders still needing CC dollars (not fully matched / not bank-confirmed)
         const sorted = [...state.orders]
           .filter(ord => !ord.bankConfirmed)
@@ -8857,6 +10021,7 @@
         }
       }
 
+      let bookGross = 0, serviceGross = 0;
       (state.sales || []).forEach(s => {
         if (s.date !== today || s.tillPosted) return;
         salesGross += (s.subtotal || 0);
@@ -8869,15 +10034,25 @@
         } else {
           bucketPay(s.paymentMethod, s.amountPaid, s.bankAccount);
         }
+        let saleBook = 0, saleSvc = 0;
         (s.items || []).forEach(it => {
           const cat = state.catalog.find(c =>
             c.id === it.id ||
             (c.title || '').toLowerCase() === (it.title || '').toLowerCase()
           );
-          if (cat && cat.isService) return;
+          const line = (Number(it.unitPrice) || 0) * (it.qty || 1);
+          if (cat && cat.isService) {
+            saleSvc += line;
+            return;
+          }
+          saleBook += line;
           const unitCost = cat && typeof cat.cost === 'number' ? cat.cost : 0;
           cogs += unitCost * (it.qty || 1);
         });
+        // If no item breakdown, treat whole sale as books
+        if (!(s.items || []).length) saleBook = Number(s.subtotal) || 0;
+        bookGross += saleBook;
+        serviceGross += saleSvc;
       });
 
       (state.preOrders || []).forEach(p => {
@@ -8899,16 +10074,19 @@
         }
       });
 
-      const salesEx = salesGross / 1.125;
+      const bookSalesEx = bookGross / 1.125;
+      const serviceSalesEx = serviceGross / 1.125;
+      const salesEx = bookSalesEx + serviceSalesEx;
       const gst = salesGross - salesEx;
       const invCredit = cogs;
       const moneyIn = cash + abl + bbl;
       // Debits: cash/banks + COGS + deposits applied (liability down)
-      // Credits: sales + gst + new deposits + inventory
+      // Credits: book sales + other sales + gst + new deposits + inventory
       const debitTot = moneyIn + cogs + depositsApplied;
-      const creditTot = salesEx + gst + deposits + invCredit;
+      const creditTot = bookSalesEx + serviceSalesEx + gst + deposits + invCredit;
       const el = (id, v) => { const n = document.getElementById(id); if (n) n.innerText = 'BZ$' + v.toFixed(2); };
-      el('posTillSalesEx', salesEx);
+      el('posTillSalesEx', bookSalesEx);
+      el('posTillServiceSalesEx', serviceSalesEx);
       el('posTillGst', gst);
       el('posTillDeposits', deposits);
       el('posTillDepositsApplied', depositsApplied);
@@ -8930,7 +10108,7 @@
           bal.className = ok ? 'text-[10px] font-bold text-emerald-800' : 'text-[10px] font-bold text-rose-700';
         }
       }
-      state._tillSnapshot = { today, cash, abl, bbl, salesGross, salesEx, gst, deposits, depositsApplied, cogs, invCredit, debitTot, creditTot };
+      state._tillSnapshot = { today, cash, abl, bbl, salesGross, salesEx, bookSalesEx, serviceSalesEx, bookGross, serviceGross, gst, deposits, depositsApplied, cogs, invCredit, debitTot, creditTot };
     }
 
     function confirmPosDayPosting() {
@@ -9176,7 +10354,7 @@
       if (!body) return;
       const rows = state.confirmedJournals || [];
       if (!rows.length) {
-        body.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-stone-400 italic">No confirmed postings yet. Use Register → Confirm posting to QB.</td></tr>';
+        body.innerHTML = '<tr><td colspan="4" class="py-8 text-center text-stone-400 italic">No confirmed postings yet. Use Register → Confirm posting to QB, or History → Journal entry.</td></tr>';
         return;
       }
       body.innerHTML = rows.map(r => `
@@ -9314,7 +10492,6 @@
         row.innerHTML = `
           <div class="flex-1 pr-2 min-w-0">
             <div class="font-bold text-[#34180A] truncate">${item.title}</div>
-            <div class="text-[10px] text-stone-500">BZ$${item.unitPrice.toFixed(2)} &times; ${item.qty}</div>
           </div>
           <div class="flex items-center space-x-1.5 font-mono">
             <button onclick="changePosCartQty(${idx}, -1)" class="w-5 h-5 bg-stone-100 rounded text-stone-700 font-bold">-</button>
@@ -10413,11 +11590,12 @@
       switchViewMode('ops');
       openLogPreOrderModal();
       document.getElementById('preBookTitle').value = title;
-      const num = parseFloat(priceStr.replace(/[^0-9.]/g, '')) || 65.00;
-      document.getElementById('preSellingPrice').value = num.toFixed(2);
+      const num = parseFloat(String(priceStr).replace(/[^0-9.]/g, '')) || 65.00;
+      const lp = document.getElementById('preLinePrice');
+      if (lp) lp.value = num.toFixed(2);
       document.getElementById('preDepositPaid').value = (num * 0.5).toFixed(2);
       recalcPreOrderDepositBalance();
-      showToast(`Pre-filling AR reservation for "${title}".`, 'info');
+      showToast('Pre-filling reservation for "' + title + '". Click Add book, then Confirm order.', 'info');
     }
 
     function openUploadAmzModal() {
@@ -10839,28 +12017,28 @@ All Fours | Hard Cover | 21.00 | 1`;
           </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button type="button" onclick="alert('How to borrow:\n\n1. Browse shelves by age group\n2. Open a book and Reserve\n3. Send WhatsApp hold to Los Bookies\n4. Pick up or request shipping\n\n$75/year membership or $5 refundable deposit per book.')" style="font-size:12px;font-weight:700;color:#234E35;background:#E8F0EA;border:1px solid #BCD4C3;border-radius:12px;padding:8px 12px;cursor:pointer;">How to Borrow</button>
+          <button type="button" id="owlHowToBorrowBtn" onclick="openHowToBorrowModal()" style="font-size:12px;font-weight:700;color:#234E35;background:#E8F0EA;border:1px solid #BCD4C3;border-radius:12px;padding:8px 12px;cursor:pointer;">How to Borrow</button>
 
         </div>
       </div>
       <div style="max-width:1120px;margin:0 auto;padding:24px 16px;display:flex;flex-direction:column;gap:20px;">
         <div style="border-radius:24px;background:linear-gradient(135deg,#321708,#48240F,#251105);color:#FFF9EB;padding:28px 24px;border:1px solid #5C3218;">
-          <div style="font-family:Cinzel,serif;font-weight:800;font-size:28px;color:#F8E8C8;line-height:1.2;">Borrow Stories, Classics &amp; New Worlds from Orange Walk</div>
-          <p style="margin:10px 0 0;font-size:14px;color:#E7D0B2;line-height:1.5;">Browse our community shelves curated by age groups. Reserve any available title via WhatsApp with zero account setup required.</p>
-          <div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:14px;font-size:12px;font-weight:600;color:#EED8B5;">
+          <div id="owlHeroTitle" style="font-family:Cinzel,serif;font-weight:800;font-size:28px;color:#F8E8C8;line-height:1.2;">Borrow Stories, Classics &amp; New Worlds from Orange Walk</div>
+          <p id="owlHeroBody" style="margin:10px 0 0;font-size:14px;color:#E7D0B2;line-height:1.5;">Browse our community shelves curated by age groups. Reserve any available title via WhatsApp with zero account setup required.</p>
+          <div id="owlHeroPerks" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:14px;font-size:12px;font-weight:600;color:#EED8B5;">
             <span>✓ Standard 14-Day Lending</span>
             <span>✓ Instant WhatsApp Hold</span>
             <span>✓ $75/yr Membership or $5 Deposit</span>
           </div>
         </div>
         <div style="background:#FFFDF8;border:1px solid #E8DCC5;border-radius:16px;padding:12px;display:flex;flex-wrap:wrap;gap:10px;">
-          <input type="text" placeholder="Search book title, author, or keyword..." style="flex:1;min-width:200px;padding:10px 14px;border:1px solid #DACBB0;border-radius:12px;font-size:14px;">
-          <select style="padding:10px 14px;border:1px solid #DACBB0;border-radius:12px;font-size:14px;background:#fff;min-width:180px;">
-            <option>All Shelves (All Ages)</option>
-            <option>Kids</option>
-            <option>Middle Grade</option>
-            <option>Young Adult</option>
-            <option>Adult</option>
+          <input type="text" id="owlPublicSearch" oninput="renderOwlPublicShelves()" placeholder="Search book title, author, or keyword..." style="flex:1;min-width:200px;padding:10px 14px;border:1px solid #DACBB0;border-radius:12px;font-size:14px;">
+          <select id="owlPublicAgeFilter" onchange="renderOwlPublicShelves()" style="padding:10px 14px;border:1px solid #DACBB0;border-radius:12px;font-size:14px;background:#fff;min-width:180px;">
+            <option value="">All Shelves (All Ages)</option>
+            <option value="Kids">Kids</option>
+            <option value="Middle Grade">Middle Grade</option>
+            <option value="Young Adult">Young Adult</option>
+            <option value="Adult">Adult</option>
           </select>
         </div>
         <div id="owlPublicShelvesHost">
@@ -10879,7 +12057,7 @@ All Fours | Hard Cover | 21.00 | 1`;
   <div class="staff-login-backdrop" id="staffLoginBackdrop">
     <div class="staff-login-card">
       <h3>Log in</h3>
-      <p>Enter the ops password to open Los Bookies Hub.<br><span style="color:#02306B;font-weight:700;">Default: bookies</span></p>
+      <p>Enter the ops password to open Los Bookies Hub.</p>
       <input type="password" id="staffPasswordInput" placeholder="Password" autocomplete="current-password">
       <div class="err" id="staffLoginErr"></div>
       <div class="staff-login-actions">
@@ -10891,7 +12069,7 @@ All Fours | Hard Cover | 21.00 | 1`;
 
   <script>
     // ===== Merged app: storefront + ops hub =====
-    // Password is case-insensitive. Default: bookies
+    // Password is case-insensitive.
     const STAFF_PASSWORD = 'bookies';
 
     // Safe sessionStorage: sandboxed docs (no allow-same-origin) throw SecurityError on access
@@ -10931,6 +12109,7 @@ All Fours | Hard Cover | 21.00 | 1`;
         document.body.classList.remove('hub-mode');
         const trig = document.getElementById('staffLoginTrigger');
         if (trig) trig.style.display = 'none';
+        if (typeof applyOwlPublicCopyToDom === 'function') applyOwlPublicCopyToDom();
         if (typeof renderOwlPublicShelves === 'function') renderOwlPublicShelves();
         window.scrollTo(0, 0);
       } catch (e) {
@@ -11050,7 +12229,7 @@ All Fours | Hard Cover | 21.00 | 1`;
         closeStaffLogin();
         showHub();
       } else {
-        if (err) err.textContent = 'Incorrect password. Use: bookies';
+        if (err) err.textContent = 'Incorrect password.';
       }
     }
 
@@ -11078,5 +12257,66 @@ All Fours | Hard Cover | 21.00 | 1`;
       document.addEventListener('DOMContentLoaded', () => setTimeout(showHub, 100));
     }
   </script>
+
+
+
+      <!-- MODAL: Customer receipt -->
+      <div id="receiptModal" class="fixed inset-0 bg-black/60 backdrop-blur-xs z-[80] flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
+          <div class="bg-slate-900 p-4 text-white flex items-center justify-between sticky top-0 z-10">
+            <div>
+              <h3 class="font-bold text-base">Customer receipt</h3>
+              <p class="text-xs text-slate-300">Sale recorded</p>
+            </div>
+            <button type="button" onclick="closeModal('receiptModal')" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div class="p-5" id="receiptSlipBody"></div>
+          <div class="px-5 pb-5">
+            <button type="button" onclick="closeModal('receiptModal')" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 rounded-xl text-xs">Done</button>
+          </div>
+        </div>
+      </div>
+
+      
+
+  <!-- How to Borrow modal -->
+  <div id="howToBorrowModal" class="fixed inset-0 bg-black/60 backdrop-blur-xs z-[90] flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200">
+      <div class="bg-[#234E35] p-4 text-white flex items-center justify-between">
+        <h3 class="font-bold text-base">How to Borrow</h3>
+        <button type="button" onclick="closeModal('howToBorrowModal')" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="p-5 text-sm text-slate-700 space-y-3" id="howToBorrowBody"></div>
+      <div class="px-5 pb-5">
+        <button type="button" onclick="closeModal('howToBorrowModal')" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 rounded-xl text-xs">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import stock modal -->
+  <div id="importStockModal" class="fixed inset-0 bg-black/60 backdrop-blur-xs z-[90] flex items-center justify-center p-4 hidden">
+    <div class="bg-[#FFFDF9] rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl border border-[#DACBB0] max-h-[92vh] overflow-y-auto">
+      <div class="bg-indigo-700 p-4 text-white flex items-center justify-between sticky top-0">
+        <div>
+          <h3 class="font-bold text-base">Import current stock</h3>
+          <p class="text-xs text-indigo-100">Paste CSV or tab-separated rows from Excel</p>
+        </div>
+        <button type="button" onclick="closeModal('importStockModal')" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="p-5 space-y-3 text-xs">
+        <p class="text-stone-600">Columns (header row optional): <span class="font-mono">Title, Author, ISBN, Price, Stock, Format, Age, Genre, Location, Synopsis, ImageURL</span></p>
+        <p class="text-[10px] text-stone-500">Location = Bookstore or Library. Age = Kids / Middle Grade / Young Adult / Adult. Price can be 65 or $65.</p>
+        <textarea id="importStockPaste" rows="10" class="w-full p-3 border border-[#DACBB0] rounded-xl font-mono text-[11px]" placeholder="Title, Author, ISBN, Price, Stock, Format, Age, Genre, Location&#10;Onyx Storm, Rebecca Yarros, 9780593440599, 65, 3, Hard Cover, Young Adult, Fantasy, Bookstore"></textarea>
+        <label class="flex items-center gap-2 text-stone-700">
+          <input type="checkbox" id="importStockReplace" class="rounded border-[#DACBB0]">
+          Replace entire catalogue (unchecked = merge / update by ISBN or title)
+        </label>
+        <div class="flex gap-2">
+          <button type="button" onclick="commitImportStock()" class="flex-1 bg-indigo-700 hover:bg-indigo-800 text-white font-bold py-2.5 rounded-xl">Import</button>
+          <button type="button" onclick="closeModal('importStockModal')" class="px-4 py-2.5 rounded-xl border border-[#DACBB0]">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
