@@ -5058,7 +5058,6 @@
       if (!lines.length) return [];
       function splitRow(line) {
         if (line.indexOf('\t') >= 0) return line.split('\t').map(function (c) { return c.trim(); });
-        // simple CSV (no nested quotes support beyond basic)
         const out = [];
         let cur = '', inQ = false;
         for (let i = 0; i < line.length; i++) {
@@ -5070,29 +5069,36 @@
         out.push(cur.trim());
         return out;
       }
+      function money(val) {
+        const n = parseFloat(String(val || '').replace(/[^0-9.]/g, ''));
+        return isNaN(n) ? 0 : n;
+      }
       let start = 0;
-      let cols = splitRow(lines[0]).map(function (c) { return c.toLowerCase(); });
-      const headerLike = cols.some(function (c) { return /title|isbn|author|price|stock|qty/.test(c); });
-      const map = { title: -1, author: -1, isbn: -1, price: -1, stock: -1, format: -1, age: -1, genre: -1, location: -1, synopsis: -1, image: -1 };
+      let cols = splitRow(lines[0]).map(function (c) { return c.toLowerCase().trim(); });
+      const headerLike = cols.some(function (c) { return /title|isbn|author|price|cost|stock|qty/.test(c); });
+      const map = { title: -1, author: -1, isbn: -1, price: -1, cost: -1, stock: -1, format: -1, age: -1, genre: -1, location: -1, synopsis: -1, image: -1 };
       if (headerLike) {
         cols.forEach(function (c, i) {
           if (/^title/.test(c)) map.title = i;
           else if (/author/.test(c)) map.author = i;
           else if (/isbn/.test(c)) map.isbn = i;
-          else if (/price|sell/.test(c)) map.price = i;
-          else if (/stock|qty|quantity|on hand/.test(c)) map.stock = i;
+          // Cost / COGS / unit cost BEFORE generic price (avoid "cost price" stealing sell)
+          else if (/^cost\b|cogs|unit\s*cost|landed|buy\s*price|purchase/.test(c)) map.cost = i;
+          else if (/^price$|sell|retail|selling/.test(c)) map.price = i;
+          else if (/stock|qty|quantity|on hand|onhand/.test(c)) map.stock = i;
           else if (/format|binding/.test(c)) map.format = i;
-          else if (/age|shelf|category/.test(c)) map.age = i;
+          else if (/^age|shelf group|age category/.test(c)) map.age = i;
           else if (/genre/.test(c)) map.genre = i;
-          else if (/location|loc/.test(c)) map.location = i;
+          else if (/location|loc\b/.test(c)) map.location = i;
           else if (/synop|desc/.test(c)) map.synopsis = i;
           else if (/image|cover|url/.test(c)) map.image = i;
         });
+        // If only one "price"-ish column and no cost, leave cost missing
         start = 1;
       } else {
-        // Title, Author, ISBN, Price, Stock, Format, Age, Genre, Location
-        map.title = 0; map.author = 1; map.isbn = 2; map.price = 3; map.stock = 4;
-        map.format = 5; map.age = 6; map.genre = 7; map.location = 8; map.synopsis = 9; map.image = 10;
+        // Title, Author, ISBN, Price (sell), Cost (COGS), Stock, Format, Age, Genre, Location, Synopsis, ImageURL
+        map.title = 0; map.author = 1; map.isbn = 2; map.price = 3; map.cost = 4; map.stock = 5;
+        map.format = 6; map.age = 7; map.genre = 8; map.location = 9; map.synopsis = 10; map.image = 11;
       }
       const rows = [];
       for (let li = start; li < lines.length; li++) {
@@ -5100,8 +5106,9 @@
         const get = function (key) { const i = map[key]; return i >= 0 && cells[i] != null ? cells[i] : ''; };
         const title = get('title');
         if (!title) continue;
-        let priceStr = get('price') || '0';
-        const priceNum = parseFloat(String(priceStr).replace(/[^0-9.]/g, '')) || 0;
+        const priceNum = money(get('price'));
+        let costNum = money(get('cost'));
+        // If cost blank but we have sell price, leave 0 so staff can fill later — do not invent
         const stock = parseInt(get('stock'), 10);
         let age = get('age') || 'Adult';
         if (/kid|children/i.test(age)) age = 'Kids';
@@ -5122,7 +5129,7 @@
           ageCategory: age,
           format: get('format') || 'Paperback',
           price: '$' + priceNum.toFixed(2),
-          cost: 0,
+          cost: costNum,
           synopsis: get('synopsis') || '',
           imageUrl: get('image') || (isbn && String(isbn).replace(/\D/g, '').length >= 10
             ? ('https://covers.openlibrary.org/b/isbn/' + String(isbn).replace(/[^0-9X]/gi, '') + '-L.jpg') : ''),
@@ -5158,6 +5165,7 @@
           if (existing) {
             existing.stock = r.stock;
             existing.price = r.price;
+            if (r.cost != null && !isNaN(Number(r.cost))) existing.cost = Number(r.cost);
             existing.author = r.author || existing.author;
             existing.format = r.format || existing.format;
             existing.ageCategory = r.ageCategory || existing.ageCategory;
@@ -12304,9 +12312,9 @@ All Fours | Hard Cover | 21.00 | 1`;
         <button type="button" onclick="closeModal('importStockModal')" class="text-white/80 hover:text-white text-lg"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="p-5 space-y-3 text-xs">
-        <p class="text-stone-600">Columns (header row optional): <span class="font-mono">Title, Author, ISBN, Price, Stock, Format, Age, Genre, Location, Synopsis, ImageURL</span></p>
-        <p class="text-[10px] text-stone-500">Location = Bookstore or Library. Age = Kids / Middle Grade / Young Adult / Adult. Price can be 65 or $65.</p>
-        <textarea id="importStockPaste" rows="10" class="w-full p-3 border border-[#DACBB0] rounded-xl font-mono text-[11px]" placeholder="Title, Author, ISBN, Price, Stock, Format, Age, Genre, Location&#10;Onyx Storm, Rebecca Yarros, 9780593440599, 65, 3, Hard Cover, Young Adult, Fantasy, Bookstore"></textarea>
+        <p class="text-stone-600">Columns (header row optional): <span class="font-mono">Title, Author, ISBN, Price, Cost, Stock, Format, Age, Genre, Location, Synopsis, ImageURL</span></p>
+        <p class="text-[10px] text-stone-500"><strong>Price</strong> = selling price (Sales). <strong>Cost</strong> = unit cost in BZ$ (COGS / inventory value). Location = Bookstore or Library. Age = Kids / Middle Grade / Young Adult / Adult.</p>
+        <textarea id="importStockPaste" rows="10" class="w-full p-3 border border-[#DACBB0] rounded-xl font-mono text-[11px]" placeholder="Title, Author, ISBN, Price, Cost, Stock, Format, Age, Genre, Location&#10;Onyx Storm, Rebecca Yarros, 9780593440599, 65, 38, 3, Hard Cover, Young Adult, Fantasy, Bookstore"></textarea>
         <label class="flex items-center gap-2 text-stone-700">
           <input type="checkbox" id="importStockReplace" class="rounded border-[#DACBB0]">
           Replace entire catalogue (unchecked = merge / update by ISBN or title)
