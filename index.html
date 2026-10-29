@@ -18,10 +18,51 @@
       }
     }, true);
 
+    function optimizeImageUrl(url, width) {
+      if (!url || typeof url !== 'string') return url || '';
+      width = width || 700;
+      // Skip data URLs and placeholders
+      if (url.indexOf('data:') === 0 || url.indexOf('placehold.co') >= 0) return url;
+      // Already proxied
+      if (url.indexOf('images.weserv.nl') >= 0) return url;
+      try {
+        var encoded = encodeURIComponent(url);
+        return 'https://images.weserv.nl/?url=' + encoded + '&w=' + width + '&output=webp&q=80';
+      } catch (e) { return url; }
+    }
+    
+    function preloadNextHeroSlide(slides, currentIdx) {
+      if (!slides || !slides.length) return;
+      var next = slides[(currentIdx + 1) % slides.length];
+      if (!next || !next.imageUrl) return;
+      var img = new Image();
+      img.src = typeof optimizeImageUrl === 'function' ? optimizeImageUrl(next.imageUrl, 1200) : next.imageUrl;
+    }
+
     function onImgErr(img, fallbackText) {
       if (!img || !img.parentElement) return;
+      // Failover: if weserv failed, try original ImgBB / source once
+      var original = img.getAttribute('data-original-src');
+      if (original && img.src.indexOf('images.weserv.nl') >= 0) {
+        img.onerror = function() {
+          img.onerror = null;
+          img.src = 'https://placehold.co/800x400/011d42/EDB926?text=' + encodeURIComponent(fallbackText || 'Los Bookies');
+        };
+        img.src = original;
+        return;
+      }
       img.onerror = null;
-      img.src = `https://placehold.co/800x400/011d42/EDB926?text=${encodeURIComponent(fallbackText || 'Los Bookies')}`;
+      img.src = 'https://placehold.co/800x400/011d42/EDB926?text=' + encodeURIComponent(fallbackText || 'Los Bookies');
+    }
+    function setOptimizedImg(img, url, alt, width) {
+      if (!img) return;
+      var orig = url || '';
+      img.setAttribute('data-original-src', orig);
+      img.alt = alt || '';
+      img.loading = img.loading || 'lazy';
+      img.decoding = 'async';
+      img.onerror = function() { onImgErr(img, alt); };
+      img.src = optimizeImageUrl(orig, width || 700);
     }
   </script>
 
@@ -891,12 +932,14 @@
       const dots = document.getElementById('hero1Dots');
       if (!container) return;
       container.innerHTML = ''; dots.innerHTML = ''; hero1ActiveIdx = 0;
+      // Preload first two slides immediately
+      if (typeof preloadNextHeroSlide === 'function') { preloadNextHeroSlide(hero1List, -1); preloadNextHeroSlide(hero1List, 0); }
       hero1List.forEach((slide, idx) => {
         const slideDiv = document.createElement('div');
         slideDiv.className = `hero-slide ${idx === 0 ? 'active' : ''}`;
         const img = document.createElement('img');
         img.src = slide.imageUrl; img.alt = slide.altText || `Hero ${idx + 1}`;
-        img.loading = idx === 0 ? 'eager' : 'lazy'; img.onerror = () => onImgErr(img, slide.altText);
+        img.loading = idx === 0 ? 'eager' : 'lazy'; img.decoding = 'async'; img.setAttribute('data-original-src', slide.imageUrl||''); img.src = (typeof optimizeImageUrl==='function'?optimizeImageUrl(slide.imageUrl,1200):slide.imageUrl); img.onerror = () => onImgErr(img, slide.altText);
         if (slide.linkUrl) {
           const a = document.createElement('a'); a.href = slide.linkUrl; a.target = '_blank'; a.rel = 'noopener noreferrer';
           a.appendChild(img); slideDiv.appendChild(a);
@@ -913,6 +956,7 @@
       document.querySelectorAll('.hero-slide').forEach((s, i) => s.classList.toggle('active', i === idx));
       document.querySelectorAll('.hero-dot').forEach((d, i) => d.classList.toggle('active', i === idx));
       hero1ActiveIdx = idx;
+      if (typeof preloadNextHeroSlide === 'function') preloadNextHeroSlide(hero1List, idx);
     }
 
     function startHero1Loop() {
@@ -931,7 +975,7 @@
         slideDiv.className = `hero2-slide ${idx === 0 ? 'active' : ''}`;
         const img = document.createElement('img');
         img.src = slide.imageUrl; img.alt = slide.altText || `Strip ${idx + 1}`;
-        img.loading = idx === 0 ? 'eager' : 'lazy'; img.onerror = () => onImgErr(img, slide.altText);
+        img.loading = idx === 0 ? 'eager' : 'lazy'; img.decoding = 'async'; img.setAttribute('data-original-src', slide.imageUrl||''); img.src = (typeof optimizeImageUrl==='function'?optimizeImageUrl(slide.imageUrl,1200):slide.imageUrl); img.onerror = () => onImgErr(img, slide.altText);
         if (slide.linkUrl) {
           const a = document.createElement('a'); a.href = slide.linkUrl; a.target = '_blank'; a.rel = 'noopener noreferrer';
           a.appendChild(img); slideDiv.appendChild(a);
@@ -1071,7 +1115,7 @@
             <button type="button" class="card-select-btn ${isSelected ? 'checked' : ''}" onclick="toggleBookSelection('${id}', event)">
               <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
             </button>
-            <img src="${b.imageUrl}" alt="${b.title}" loading="lazy" onerror="onImgErr(this, '${b.title}')" />
+            <img src="${typeof optimizeImageUrl==='function'?optimizeImageUrl(b.imageUrl,400):b.imageUrl}" data-original-src="${b.imageUrl||''}" alt="${b.title}" loading="lazy" decoding="async" onerror="onImgErr(this, '${b.title}')" />
           </div>
           <div class="book-info" style="align-items:stretch;text-align:left;gap:6px;">
             <div style="font-size:10px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#b45309;">${b.genre || 'General'}</div>
@@ -1353,12 +1397,8 @@
             <button type="button" onclick="switchTab('owl')" id="hdrNavOwl" class="hdr-nav-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-slate-700 whitespace-nowrap">OWL</button>
             <button type="button" onclick="switchTab('training')" id="hdrNavTraining" class="hdr-nav-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-slate-700 whitespace-nowrap">Training</button>
             <button type="button" onclick="switchTab('website')" id="hdrNavWebsite" class="hdr-nav-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-slate-700 whitespace-nowrap">Website</button>
-            <button type="button" onclick="switchTab('library')" id="hdrNavLibrary" class="hdr-nav-btn px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold text-slate-200 hover:bg-slate-700 whitespace-nowrap">Library</button>
           </nav>
           <div class="flex items-center gap-1.5 shrink-0">
-            <button type="button" onclick="generateDemo()" class="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-amber-500/20 text-amber-200 hover:bg-amber-500/30 border border-amber-500/40" title="Load Full Demo">
-              <i class="fa-solid fa-wand-magic-sparkles"></i> Demo
-            </button>
             <button type="button" onclick="saveAppState(true)" class="px-2 py-1 rounded-lg text-[10px] font-bold text-emerald-300 hover:bg-slate-700">Save</button>
             <button type="button" onclick="logoutToStorefront()" class="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-rose-600 text-white hover:bg-rose-700">Log out</button>
           </div>
@@ -1726,84 +1766,51 @@
         </button>
       </div>
 
-      <form id="newRentalForm" onsubmit="handleNewRentalSubmit(event)" class="p-6 space-y-4 text-xs">
-        <div>
-          <label class="block font-semibold text-[#4B3426] mb-1">Select Book from Inventory *</label>
-          <select id="rentalBookSelect" required class="w-full p-2 border border-[#DACBB0] rounded-xl text-xs bg-white"></select>
+      <form id="newRentalForm" onsubmit="return confirmLoanCheckout(event)" class="p-6 space-y-4 text-xs">
+        <!-- 1. Member (required) -->
+        <div class="relative">
+          <label class="block font-semibold text-[#4B3426] mb-1">Member *</label>
+          <input type="text" id="rentalMemberSearch" autocomplete="off" placeholder="Search by name or email…" oninput="filterActiveMemberSearch()" onfocus="filterActiveMemberSearch()" class="w-full p-2.5 border border-[#DACBB0] rounded-xl text-xs bg-white">
+          <div id="rentalMemberResults" class="hidden absolute z-30 left-0 right-0 mt-1 max-h-44 overflow-y-auto bg-white border border-[#DACBB0] rounded-xl shadow-lg"></div>
+          <div id="rentalMemberChip" class="hidden mt-2 flex items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200">
+            <div class="min-w-0">
+              <div class="font-semibold text-emerald-900 text-xs truncate" id="rentalMemberChipName"></div>
+              <div class="text-[10px] text-emerald-800 truncate" id="rentalMemberChipMeta"></div>
+            </div>
+            <button type="button" onclick="clearRentalMember()" class="text-[10px] font-bold text-emerald-900 hover:underline shrink-0">Change</button>
+          </div>
+          <p class="text-[10px] text-[#7A6755] mt-1">Sell membership on <strong>Register</strong> (Annual Membership $75). Active members show here.</p>
+          <input type="hidden" id="renterEmail" value="">
+          <input type="hidden" id="renterName" value="">
         </div>
 
-        <div class="bg-[#FAF4E5] p-3 rounded-2xl border border-[#EADBBE] space-y-3">
-          <div class="font-semibold text-[#2B170B] flex items-center gap-1.5 text-xs">
-            <i class="fa-solid fa-user text-[#234E35]"></i> Patron Details
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label class="block font-medium text-[#4B3426] mb-1">Email Address *</label>
-              <input type="email" id="renterEmail" oninput="handleNewRentalEmailInput()" required placeholder="e.g. maria@gmail.com" class="w-full p-2 border border-[#DACBB0] rounded-xl text-xs bg-white">
-            </div>
-            <div>
-              <label class="block font-medium text-[#4B3426] mb-1">Borrower Name *</label>
-              <input type="text" id="renterName" required placeholder="e.g. Maria Gonzalez" class="w-full p-2 border border-[#DACBB0] rounded-xl text-xs bg-white">
-            </div>
-            <div>
-              <label class="block font-medium text-[#4B3426] mb-1">WhatsApp / Phone *</label>
-              <input type="tel" id="renterPhone" required placeholder="e.g. +501 611-4395" class="w-full p-2 border border-[#DACBB0] rounded-xl text-xs bg-white">
-            </div>
-          </div>
-
-          <div id="renterMemberAutoRecognized" class="hidden p-2 rounded-lg text-[11px] font-medium flex items-center gap-1.5">
-            <span id="renterMemberAutoRecognizedText"></span>
-          </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label class="block font-medium text-[#4B3426] mb-1">Reader Plan / Tier</label>
-              <select id="renterTier" onchange="adjustDepositForTier('renter')" class="w-full p-2 border border-[#DACBB0] rounded-xl text-xs bg-white">
-                <option value="Annual Member ($75/yr - 1 Book Plan)">Annual Member ($75/yr - 1 Book Plan)</option>
-                <option value="Standard Patron ($5 Deposit)">Standard Patron ($5 Deposit)</option>
-                <option value="Book Club Member">Los Bookies Club</option>
-                <option value="Student / Educator">Student / Educator</option>
-                <option value="VIP / Trusted">VIP / Trusted Reader</option>
-              </select>
-            </div>
-            <div>
-              <label class="block font-medium text-[#4B3426] mb-1">Handing over arrangement</label>
-              <select id="renterArrangement" class="w-full p-2 border border-[#DACBB0] rounded-xl text-xs bg-white">
-                <option value="Pick up">Pick up</option>
-                <option value="Ship to me">Ship to me</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="p-2.5 bg-white rounded-xl border border-[#DACBB0] space-y-1.5">
-            <div class="flex items-center justify-between gap-2">
-              <label class="font-medium text-[#4B3426]">Annual Membership Payment Date:</label>
-              <input type="date" id="rentalPaymentDate" onchange="updatePaymentDateExpiryPreview('rental')" class="p-1 border border-[#DACBB0] rounded-lg text-xs">
-            </div>
-            <p id="rentalPaymentExpiryText" class="text-[10px] text-[#7A6755] font-mono"></p>
-          </div>
+        <!-- 2. Book (required) -->
+        <div class="relative">
+          <label class="block font-semibold text-[#4B3426] mb-1">Book *</label>
+          <input type="text" id="rentalBookSearch" autocomplete="off" placeholder="Search title or author…" oninput="filterRentalBookSearch()" onfocus="filterRentalBookSearch()" class="w-full p-2.5 border border-[#DACBB0] rounded-xl text-xs bg-white">
+          <input type="hidden" id="rentalBookSelect" value="">
+          <div id="rentalBookResults" class="hidden absolute z-30 left-0 right-0 mt-1 max-h-48 overflow-y-auto bg-white border border-[#DACBB0] rounded-xl shadow-lg"></div>
+          <p id="rentalBookChosen" class="mt-1 text-[11px] text-[#234E35] font-medium hidden"></p>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <!-- 3. Contact + logistics -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label class="block font-semibold text-[#4B3426] mb-1">Deposit Amount ($)</label>
-            <input type="number" step="1.00" id="rentalDepositAmount" value="0.00" class="w-full p-2 border border-[#DACBB0] rounded-xl text-xs">
+            <label class="block font-medium text-[#4B3426] mb-1">WhatsApp / Phone *</label>
+            <input type="tel" id="renterPhone" required placeholder="+501 …" class="w-full p-2 border border-[#DACBB0] rounded-xl text-xs bg-white">
           </div>
           <div>
-            <label class="block font-semibold text-[#4B3426] mb-1">Payment Method</label>
-            <select id="rentalDepositMethod" class="w-full p-2 border border-[#DACBB0] rounded-xl text-xs">
-              <option value="Annual Fee ($75 Paid)">Annual Fee ($75 Paid)</option>
-              <option value="Cash">Cash in Drawer</option>
-              <option value="DigiWallet">DigiWallet</option>
-              <option value="Credit / Debit Card">Credit / Debit Card</option>
-              <option value="Waived">Waived (VIP)</option>
+            <label class="block font-medium text-[#4B3426] mb-1">Handover</label>
+            <select id="renterArrangement" class="w-full p-2 border border-[#DACBB0] rounded-xl text-xs bg-white">
+              <option value="Pick up">Pick up</option>
+              <option value="Ship to me">Ship to me</option>
             </select>
           </div>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label class="block font-semibold text-[#4B3426] mb-1">Condition at Check-out *</label>
+            <label class="block font-semibold text-[#4B3426] mb-1">Condition *</label>
             <select id="conditionOut" required class="w-full p-2 border border-[#DACBB0] rounded-xl text-xs">
               <option value="Mint / Brand New">Mint / Brand New</option>
               <option value="Like New" selected>Like New</option>
@@ -1812,13 +1819,20 @@
             </select>
           </div>
           <div>
-            <label class="block font-semibold text-[#4B3426] mb-1">Due Date (14 Days) *</label>
+            <label class="block font-semibold text-[#4B3426] mb-1">Due date (14 days) *</label>
             <input type="date" id="rentalDueDate" required class="w-full p-2 border border-[#DACBB0] rounded-xl text-xs">
           </div>
         </div>
 
-        <div class="pt-2 flex gap-2">
-          <button type="submit" class="flex-1 bg-[#234E35] hover:bg-[#1A3B28] text-white font-semibold py-2.5 px-4 rounded-xl transition shadow-xs">
+        <!-- Hidden defaults for annual members (no deposit at desk) -->
+        <input type="hidden" id="renterTier" value="Annual Member ($75/yr - 1 Book Plan)">
+        <input type="hidden" id="rentalDepositAmount" value="0">
+        <input type="hidden" id="rentalDepositMethod" value="Annual Fee ($75 Paid)">
+        <input type="hidden" id="rentalPaymentDate" value="">
+        <div id="renterMemberAutoRecognized" class="hidden"><span id="renterMemberAutoRecognizedText"></span></div>
+
+        <div class="pt-1 flex gap-2">
+          <button type="button" id="confirmLoanCheckoutBtn" onclick="confirmLoanCheckout()" class="flex-1 bg-[#234E35] hover:bg-[#1A3B28] text-white font-semibold py-2.5 px-4 rounded-xl transition shadow-xs">
             Confirm Checkout
           </button>
           <button type="button" onclick="closeModal('newRentalModal')" class="px-4 py-2.5 border border-[#DACBB0] rounded-xl text-[#5C3419] hover:bg-[#FAF4E5]">
@@ -1953,19 +1967,26 @@
     let isStaffAuthenticated = false;
 
     function getAnnualMembersRegistry() {
+      let registry = {};
       try {
         const stored = localStorage.getItem('owl_annual_members_data');
-        if (stored) return JSON.parse(stored);
+        if (stored) registry = JSON.parse(stored) || {};
       } catch (e) {}
+      try {
+        if (typeof state !== 'undefined' && state.annualMembers) {
+          Object.assign(registry, state.annualMembers);
+        }
+      } catch (e) {}
+      if (registry && Object.keys(registry).length) return registry;
       const seedYearAgo = new Date();
       seedYearAgo.setMonth(seedYearAgo.getMonth() - 2);
       const seedDateStr = seedYearAgo.toISOString().split('T')[0];
-
       return {
-        'stephanie.lopez@yahoo.com': { paymentDate: seedDateStr, amount: 75.00, notes: 'Active member' },
-        'lucia.novelo@gmail.com': { paymentDate: seedDateStr, amount: 75.00, notes: 'Active member' }
+        'stephanie.lopez@yahoo.com': { email: 'stephanie.lopez@yahoo.com', name: 'Stephanie Lopez', paymentDate: seedDateStr, amount: 75.00, notes: 'Active member' },
+        'lucia.novelo@gmail.com': { email: 'lucia.novelo@gmail.com', name: 'Lucia Novelo', paymentDate: seedDateStr, amount: 75.00, notes: 'Active member' }
       };
     }
+    window.getAnnualMembersRegistry = getAnnualMembersRegistry;
 
     function saveAnnualMembersRegistry(registry) {
       try {
@@ -1973,17 +1994,40 @@
       } catch (e) {}
     }
 
-    function registerAnnualMemberPayment(email, paymentDateStr) {
-      if (!email) return;
-      const clean = email.toLowerCase().trim();
+    function registerAnnualMemberPayment(email, paymentDateStr, name) {
+      if (!email) return false;
+      const clean = String(email).toLowerCase().trim();
+      if (!clean || clean.indexOf('@') < 0) return false;
       const registry = getAnnualMembersRegistry();
+      const paymentDate = paymentDateStr || new Date().toISOString().split('T')[0];
+      let exp;
+      try {
+        exp = new Date(paymentDate);
+        if (isNaN(exp.getTime())) exp = new Date();
+        exp.setFullYear(exp.getFullYear() + 1);
+      } catch (e) {
+        exp = new Date(); exp.setFullYear(exp.getFullYear() + 1);
+      }
       registry[clean] = {
-        paymentDate: paymentDateStr || new Date().toISOString().split('T')[0],
+        email: clean,
+        name: name || (registry[clean] && registry[clean].name) || clean,
+        paymentDate: paymentDate,
+        expiryDate: exp.toISOString().split('T')[0],
         amount: 75.00,
         lastUpdated: new Date().toISOString().split('T')[0]
       };
       saveAnnualMembersRegistry(registry);
+      // Mirror on state so Save/restore keeps members
+      try {
+        if (typeof state !== 'undefined') {
+          if (!state.annualMembers) state.annualMembers = {};
+          state.annualMembers[clean] = registry[clean];
+          if (typeof saveAppState === 'function') saveAppState(false);
+        }
+      } catch (e) {}
+      return true;
     }
+    window.registerAnnualMemberPayment = registerAnnualMemberPayment;
 
     function checkAnnualMemberStatus(email) {
       if (!email) return { isMember: false, isExpired: false };
@@ -2486,72 +2530,256 @@
       showToast(`Hold declined and book restocked.`);
     }
 
+    function filterRentalBookSearch() {
+      const q = (document.getElementById('rentalBookSearch')?.value || '').trim().toLowerCase();
+      const box = document.getElementById('rentalBookResults');
+      if (!box) return;
+      if (typeof syncLibraryBooksFromCatalog === 'function') syncLibraryBooksFromCatalog();
+      let list = (libraryBooks || []).filter(b => b.available);
+      if (q) list = list.filter(b => ((b.title||'') + ' ' + (b.author||'')).toLowerCase().includes(q));
+      if (!list.length) {
+        box.innerHTML = '<div class="px-3 py-2 text-[11px] text-stone-500">No available titles match.</div>';
+        box.classList.remove('hidden');
+        return;
+      }
+      box.innerHTML = list.slice(0, 40).map(b =>
+        '<button type="button" class="w-full text-left px-3 py-2 text-xs hover:bg-[#FAF4E5] border-b border-[#F0E6D4] last:border-0" onclick="pickRentalBook(\'' + String(b.id).replace(/'/g, "\\'") + '\', \'' + String(b.title||'').replace(/'/g, "\\'") + '\')">' +
+        '<span class="font-semibold text-[#2B170B]">' + (b.title||'') + '</span>' +
+        (b.author ? '<span class="text-[#7A5B45]"> — ' + b.author + '</span>' : '') +
+        '</button>'
+      ).join('');
+      box.classList.remove('hidden');
+    }
+
+    function pickRentalBook(id, title) {
+      const hid = document.getElementById('rentalBookSelect');
+      const search = document.getElementById('rentalBookSearch');
+      const chosen = document.getElementById('rentalBookChosen');
+      const box = document.getElementById('rentalBookResults');
+      if (hid) hid.value = id || '';
+      if (search) search.value = title || '';
+      if (chosen) { chosen.textContent = 'Selected: ' + (title || id); chosen.classList.remove('hidden'); }
+      if (box) box.classList.add('hidden');
+    }
+    window.pickRentalBook = pickRentalBook;
+    window.pickActiveMember = typeof pickActiveMember === 'function' ? pickActiveMember : window.pickActiveMember;
+
+    function getActiveAnnualMembers() {
+      const registry = (typeof getAnnualMembersRegistry === 'function') ? getAnnualMembersRegistry() : {};
+      const today = new Date(); today.setHours(0,0,0,0);
+      const out = [];
+      Object.keys(registry || {}).forEach(function (email) {
+        const m = registry[email] || {};
+        if (!m.paymentDate && !m.expiryDate) return;
+        let expStr = m.expiryDate;
+        if (!expStr && m.paymentDate) {
+          const d = new Date(m.paymentDate);
+          d.setFullYear(d.getFullYear() + 1);
+          expStr = d.toISOString().split('T')[0];
+        }
+        const exp = new Date(expStr);
+        exp.setHours(0,0,0,0);
+        if (exp < today) return;
+        out.push({
+          email: (m.email || email || '').toLowerCase(),
+          name: m.name || email || '',
+          paymentDate: m.paymentDate,
+          expiryDate: expStr
+        });
+      });
+      return out;
+    }
+
+    function filterActiveMemberSearch() {
+      const q = (document.getElementById('rentalMemberSearch')?.value || '').trim().toLowerCase();
+      const box = document.getElementById('rentalMemberResults');
+      if (!box) return;
+      let list = getActiveAnnualMembers();
+      if (q) list = list.filter(m => (m.name + ' ' + m.email).toLowerCase().includes(q));
+      if (!list.length) {
+        box.innerHTML = '<div class="px-3 py-2 text-[11px] text-stone-500">No active members' + (q ? ' match' : ' — sell membership on Register') + '.</div>';
+        box.classList.remove('hidden');
+        return;
+      }
+      box.innerHTML = list.slice(0, 30).map(m =>
+        '<button type="button" class="w-full text-left px-3 py-2 text-xs hover:bg-[#FAF4E5] border-b border-[#F0E6D4] last:border-0" onclick="pickActiveMember(\'' +
+        String(m.email).replace(/'/g, "\\'") + '\', \'' + String(m.name||'').replace(/'/g, "\\'") + '\', \'' + String(m.paymentDate||'').replace(/'/g, "\\'") + '\', \'' + String(m.expiryDate||'').replace(/'/g, "\\'") + '\')">' +
+        '<span class="font-semibold">' + (m.name || m.email) + '</span>' +
+        '<span class="text-[#7A5B45]"> · ' + m.email + '</span>' +
+        (m.expiryDate ? '<div class="text-[10px] text-emerald-800">Valid until ' + m.expiryDate + '</div>' : '') +
+        '</button>'
+      ).join('');
+      box.classList.remove('hidden');
+    }
+
+    function pickActiveMember(email, name, paymentDate, expiryDate) {
+      const e = document.getElementById('renterEmail');
+      const n = document.getElementById('renterName');
+      const tier = document.getElementById('renterTier');
+      const dep = document.getElementById('rentalDepositAmount');
+      const meth = document.getElementById('rentalDepositMethod');
+      const pay = document.getElementById('rentalPaymentDate');
+      const search = document.getElementById('rentalMemberSearch');
+      const box = document.getElementById('rentalMemberResults');
+      const chip = document.getElementById('rentalMemberChip');
+      if (e) e.value = email || '';
+      if (n) n.value = (name && name !== email) ? name : (email || '');
+      if (tier) tier.value = 'Annual Member ($75/yr - 1 Book Plan)';
+      if (dep) dep.value = '0';
+      if (meth) meth.value = 'Annual Fee ($75 Paid)';
+      if (pay) pay.value = paymentDate || createDateOffset(0);
+      if (search) { search.value = ''; search.classList.add('hidden'); }
+      if (box) box.classList.add('hidden');
+      if (chip) {
+        chip.classList.remove('hidden');
+        const cn = document.getElementById('rentalMemberChipName');
+        const cm = document.getElementById('rentalMemberChipMeta');
+        if (cn) cn.textContent = (name && name !== email) ? name : email;
+        if (cm) cm.textContent = email + (expiryDate ? ' · Valid until ' + expiryDate : '');
+      }
+    }
+
+    function clearRentalMember() {
+      const e = document.getElementById('renterEmail');
+      const n = document.getElementById('renterName');
+      const search = document.getElementById('rentalMemberSearch');
+      const chip = document.getElementById('rentalMemberChip');
+      if (e) e.value = '';
+      if (n) n.value = '';
+      if (search) { search.value = ''; search.classList.remove('hidden'); }
+      if (chip) chip.classList.add('hidden');
+    }
+    window.pickActiveMember = pickActiveMember;
+    window.clearRentalMember = clearRentalMember;
+    window.filterRentalBookSearch = filterRentalBookSearch;
+    window.filterActiveMemberSearch = filterActiveMemberSearch;
+
     function openNewRentalModal() {
-      const select = document.getElementById('rentalBookSelect');
-      if (!select) return;
+      if (typeof syncLibraryBooksFromCatalog === 'function') syncLibraryBooksFromCatalog();
+      const hid = document.getElementById('rentalBookSelect');
+      const search = document.getElementById('rentalBookSearch');
+      const chosen = document.getElementById('rentalBookChosen');
+      const box = document.getElementById('rentalBookResults');
+      if (hid) hid.value = '';
+      if (search) search.value = '';
+      if (chosen) { chosen.textContent = ''; chosen.classList.add('hidden'); }
+      if (box) box.classList.add('hidden');
+      if (typeof clearRentalMember === 'function') clearRentalMember();
+      const ms = document.getElementById('rentalMemberSearch');
+      if (ms) { ms.value = ''; ms.classList.remove('hidden'); }
+      document.getElementById('rentalMemberResults')?.classList.add('hidden');
 
-      select.innerHTML = libraryBooks.map(b => `
-        <option value="${b.id}" ${!b.available ? 'disabled' : ''}>
-          ${b.title} (${b.available ? 'Available' : 'Checked Out'})
-        </option>
-      `).join('');
-
-      document.getElementById('renterName').value = '';
-      document.getElementById('renterEmail').value = '';
-      document.getElementById('renterPhone').value = '+501 ';
-      document.getElementById('renterTier').value = 'Annual Member ($75/yr - 1 Book Plan)';
-      document.getElementById('rentalDepositAmount').value = '0.00';
-      document.getElementById('rentalDepositMethod').value = 'Annual Fee ($75 Paid)';
-      document.getElementById('conditionOut').value = 'Like New';
-      document.getElementById('rentalDueDate').value = createDateOffset(14);
-      document.getElementById('rentalPaymentDate').value = createDateOffset(0);
-      document.getElementById('renterMemberAutoRecognized')?.classList.add('hidden');
+      if (document.getElementById('renterName')) document.getElementById('renterName').value = '';
+      if (document.getElementById('renterEmail')) document.getElementById('renterEmail').value = '';
+      if (document.getElementById('renterPhone')) document.getElementById('renterPhone').value = '+501 ';
+      if (document.getElementById('renterTier')) document.getElementById('renterTier').value = 'Annual Member ($75/yr - 1 Book Plan)';
+      if (document.getElementById('rentalDepositAmount')) document.getElementById('rentalDepositAmount').value = '0';
+      if (document.getElementById('rentalDepositMethod')) document.getElementById('rentalDepositMethod').value = 'Annual Fee ($75 Paid)';
+      if (document.getElementById('conditionOut')) document.getElementById('conditionOut').value = 'Like New';
+      if (document.getElementById('rentalDueDate')) document.getElementById('rentalDueDate').value = createDateOffset(14);
+      if (document.getElementById('rentalPaymentDate')) document.getElementById('rentalPaymentDate').value = createDateOffset(0);
 
       openModal('newRentalModal');
     }
 
-    function handleNewRentalSubmit(e) {
-      e.preventDefault();
-      const bookId = document.getElementById('rentalBookSelect').value;
-      const renterName = document.getElementById('renterName').value.trim();
-      const renterEmail = document.getElementById('renterEmail').value.trim();
-      const renterPhone = document.getElementById('renterPhone').value.trim();
-      const renterTier = document.getElementById('renterTier').value;
-      const paymentDate = document.getElementById('rentalPaymentDate').value || createDateOffset(0);
+    function confirmLoanCheckout(e) {
+      if (e && e.preventDefault) e.preventDefault();
+      try {
+        const bookId = (document.getElementById('rentalBookSelect') && document.getElementById('rentalBookSelect').value || '').trim();
+        const bookTitleTyped = (document.getElementById('rentalBookSearch') && document.getElementById('rentalBookSearch').value || '').trim();
+        const renterName = (document.getElementById('renterName') && document.getElementById('renterName').value || '').trim();
+        const renterEmail = (document.getElementById('renterEmail') && document.getElementById('renterEmail').value || '').trim();
+        const renterPhone = (document.getElementById('renterPhone') && document.getElementById('renterPhone').value || '').trim();
+        const renterTier = (document.getElementById('renterTier') && document.getElementById('renterTier').value) || 'Annual Member ($75/yr - 1 Book Plan)';
+        const paymentDate = (document.getElementById('rentalPaymentDate') && document.getElementById('rentalPaymentDate').value) || (typeof createDateOffset === 'function' ? createDateOffset(0) : new Date().toISOString().split('T')[0]);
 
-      const book = libraryBooks.find(b => b.id === bookId);
-      if (!book) return;
+        if (!renterEmail) {
+          alert('Select an active member first.');
+          return false;
+        }
+        if (!bookId && !bookTitleTyped) {
+          alert('Select a book from the list (click a result so it shows Selected: …).');
+          return false;
+        }
+        if (!renterPhone || String(renterPhone).replace(/\s/g, '').length < 6) {
+          alert('Enter a WhatsApp / phone number.');
+          return false;
+        }
 
-      if (renterTier.includes('$75') && renterEmail) {
-        registerAnnualMemberPayment(renterEmail, paymentDate);
+        if (typeof syncLibraryBooksFromCatalog === 'function') syncLibraryBooksFromCatalog();
+
+        let book = null;
+        if (typeof libraryBooks !== 'undefined' && libraryBooks) {
+          book = libraryBooks.find(function(b) { return b.id === bookId; });
+          if (!book && bookTitleTyped) {
+            var q = bookTitleTyped.toLowerCase();
+            book = libraryBooks.find(function(b) { return (b.title || '').toLowerCase() === q; })
+              || libraryBooks.find(function(b) { return (b.title || '').toLowerCase().indexOf(q) >= 0; });
+          }
+        }
+        if (!book && typeof state !== 'undefined' && state.catalog) {
+          var cat = state.catalog.find(function(c) {
+            return !c.isService && (c.id === bookId || (c.title || '').toLowerCase() === bookTitleTyped.toLowerCase());
+          });
+          if (cat) book = { id: cat.id, title: cat.title, author: cat.author || '', available: true };
+        }
+        if (!book) {
+          alert('Book not found. Click a title in the search dropdown.');
+          return false;
+        }
+
+        if (typeof rentalsList === 'undefined') {
+          alert('Loan system not ready. Refresh the page and try again.');
+          return false;
+        }
+
+        rentalsList.unshift({
+          id: 'RENT-' + Math.floor(100 + Math.random() * 900),
+          bookId: book.id,
+          bookTitle: book.title,
+          renterName: renterName || renterEmail,
+          renterEmail: renterEmail,
+          renterPhone: renterPhone,
+          renterTier: renterTier,
+          paymentDate: paymentDate,
+          deliveryArrangement: (document.getElementById('renterArrangement') && document.getElementById('renterArrangement').value) || 'Pick up',
+          shippingAddress: '',
+          conditionOut: (document.getElementById('conditionOut') && document.getElementById('conditionOut').value) || 'Like New',
+          conditionIn: null,
+          depositAmount: 0,
+          depositMethod: 'Annual Fee ($75 Paid)',
+          checkoutDate: (typeof createDateOffset === 'function' ? createDateOffset(0) : new Date().toISOString().split('T')[0]),
+          dueDate: (document.getElementById('rentalDueDate') && document.getElementById('rentalDueDate').value) || (typeof createDateOffset === 'function' ? createDateOffset(14) : ''),
+          extensions: 0,
+          status: 'active'
+        });
+
+        book.available = false;
+        try {
+          if (state && state.catalog) {
+            var c2 = state.catalog.find(function(c) { return c.id === book.id; });
+            if (c2) c2.available = false;
+          }
+        } catch (e1) {}
+
+        var modal = document.getElementById('newRentalModal');
+        if (modal) modal.classList.add('hidden');
+
+        try { if (typeof renderTrackerTable === 'function') renderTrackerTable(); } catch (e2) { console.warn(e2); }
+        try { if (typeof syncLibraryBooksFromCatalog === 'function') syncLibraryBooksFromCatalog(); } catch (e3) {}
+        try { if (typeof renderOwlPublicShelves === 'function') renderOwlPublicShelves(); } catch (e4) {}
+        try { if (typeof saveAppState === 'function') saveAppState(false); } catch (e5) {}
+
+        alert('Checkout complete: ' + (renterName || renterEmail) + ' — ' + book.title);
+      } catch (err) {
+        console.error('confirmLoanCheckout', err);
+        alert('Checkout failed: ' + (err && err.message ? err.message : String(err)));
       }
-
-      rentalsList.unshift({
-        id: `RENT-${Math.floor(100 + Math.random() * 900)}`,
-        bookId: book.id,
-        bookTitle: book.title,
-        renterName: renterName,
-        renterEmail: renterEmail,
-        renterPhone: renterPhone,
-        renterTier: renterTier,
-        paymentDate: paymentDate,
-        deliveryArrangement: document.getElementById('renterArrangement').value,
-        shippingAddress: '',
-        conditionOut: document.getElementById('conditionOut').value,
-        conditionIn: null,
-        depositAmount: parseFloat(document.getElementById('rentalDepositAmount').value) || 0,
-        depositMethod: document.getElementById('rentalDepositMethod').value,
-        checkoutDate: createDateOffset(0),
-        dueDate: document.getElementById('rentalDueDate').value,
-        extensions: 0,
-        status: 'active'
-      });
-
-      book.available = false;
-      closeModal('newRentalModal');
-      renderTrackerTable();
-      showToast(`Checkout logged for ${renterName}!`);
+      return false;
     }
+    window.confirmLoanCheckout = confirmLoanCheckout;
+    function handleNewRentalSubmit(e) { return confirmLoanCheckout(e); }
+    window.handleNewRentalSubmit = handleNewRentalSubmit;
 
     function openCheckInModal(rentalId) {
       const rental = rentalsList.find(r => r.id === rentalId);
@@ -2650,12 +2878,22 @@
     }
 
     function openModal(id) { document.getElementById(id)?.classList.remove('hidden'); }
-    function closeModal(id) { document.getElementById(id)?.classList.add('hidden'); }
+    // Prefer hub closeModal if already defined; otherwise local
+    if (typeof window.closeModal !== 'function') {
+      window.closeModal = function(id) { document.getElementById(id)?.classList.add('hidden'); };
+    }
+    function closeModal(id) {
+      if (window.closeModal && window.closeModal !== closeModal) return window.closeModal(id);
+      document.getElementById(id)?.classList.add('hidden');
+    }
 
-    function showToast(msg) {
+    function deskShowToast(msg) {
       const toast = document.getElementById('toastNotification');
       const toastMsg = document.getElementById('toastMessage');
-      if (!toast || !toastMsg) return;
+      if (typeof window.showToast === 'function' && window.showToast !== deskShowToast) {
+        try { window.showToast(String(msg), 'info'); return; } catch (e) {}
+      }
+      if (!toast || !toastMsg) { try { alert(msg); } catch (e) {} return; }
       toastMsg.innerText = msg;
       toast.classList.remove('translate-y-20', 'opacity-0');
       toast.classList.add('translate-y-0', 'opacity-100');
@@ -2663,6 +2901,14 @@
         toast.classList.add('translate-y-20', 'opacity-0');
         toast.classList.remove('translate-y-0', 'opacity-100');
       }, 3200);
+    }
+    // Only set showToast if hub has not defined a richer one yet
+    if (typeof window.showToast !== 'function') window.showToast = deskShowToast;
+    function showToast(msg, type) {
+      if (typeof window.showToast === 'function' && window.showToast !== showToast) {
+        return window.showToast(msg, type);
+      }
+      return deskShowToast(msg);
     }
 
     window.onload = function() {
@@ -2994,6 +3240,11 @@
                       <td class="py-1.5 px-2 text-right" id="posTillSalesEx">BZ$0.00</td>
                     </tr>
                     <tr>
+                      <td class="py-1.5 px-2 font-sans">Sales (Library) <span class="text-[9px] text-stone-400 font-normal">(membership, excl. GST)</span></td>
+                      <td class="py-1.5 px-2 text-right text-stone-400">—</td>
+                      <td class="py-1.5 px-2 text-right" id="posTillMembershipSalesEx">BZ$0.00</td>
+                    </tr>
+                    <tr>
                       <td class="py-1.5 px-2 font-sans">Other Sales <span class="text-[9px] text-stone-400 font-normal">(services, excl. GST)</span></td>
                       <td class="py-1.5 px-2 text-right text-stone-400">—</td>
                       <td class="py-1.5 px-2 text-right" id="posTillServiceSalesEx">BZ$0.00</td>
@@ -3049,6 +3300,8 @@
               <div>
                 <label class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Customer name</label>
                 <input type="text" id="posCustomerName" class="mt-0.5 w-full p-2 text-xs border border-slate-300 rounded-lg bg-white" placeholder="Walk-in or customer name" autocomplete="name">
+                <label class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mt-1.5 block">Email <span class="font-normal normal-case text-slate-400">(required for membership)</span></label>
+                <input type="email" id="posCustomerEmail" class="mt-0.5 w-full p-2 text-xs border border-slate-300 rounded-lg bg-white" placeholder="member@email.com" autocomplete="email">
               </div>
               <div class="relative">
                 <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 text-xs"></i>
@@ -3431,6 +3684,7 @@
                   <option>BBL (bank)</option>
                   <option>Customer Deposits</option>
                   <option>Book Sales</option>
+                  <option>Sales (Library)</option>
                   <option>Other Sales</option>
                   <option>GST Payable</option>
                   <option>COGS</option>
@@ -3446,6 +3700,7 @@
                   <option>BBL (bank)</option>
                   <option>Customer Deposits</option>
                   <option>Book Sales</option>
+                  <option>Sales (Library)</option>
                   <option>Other Sales</option>
                   <option>GST Payable</option>
                   <option>COGS</option>
@@ -4880,42 +5135,7 @@
         { id: 'CC-5', date: '2026-09-18', card: 'Belize Bank Visa (*4021)', desc: 'AMZN MKTP US* partial', usdAmount: 63.10, status: 'Pending', linkedOrderId: null }
       ],
 
-      catalog: [
-        // —— Bookstore stock ——
-        { id: 'CAT-1', isbn: '9780593440599', title: 'Onyx Storm (The Empyrean #3)', author: 'Rebecca Yarros', genre: 'Fantasy', age: 'Young Adult', ageCategory: 'Young Adult', format: 'Hard Cover', price: '$65.00', cost: 38.00, synopsis: 'The third Empyrean novel — dragons, war college, and high-stakes romance.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780593440599-L.jpg', isPreOrder: true, published: false, stock: 0, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-2', isbn: '9781837005048', title: "Body Count - Amen's Obsession", author: 'B.B. Reid', genre: 'Dark Romance', age: 'Adults', ageCategory: 'Adult', format: 'Paperback', price: '$55.00', cost: 32.00, synopsis: 'A high-stakes dark romance of rivalry and obsession.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9781837005048-L.jpg', isPreOrder: true, published: false, stock: 0, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-3', isbn: '9781250178602', title: 'The Women: A Novel', author: 'Kristin Hannah', genre: 'Historical Fiction', age: 'Adults', ageCategory: 'Adult', format: 'Hard Cover', price: '$58.00', cost: 34.00, synopsis: 'Women who served in Vietnam and the battles they faced at home.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9781250178602-L.jpg', isPreOrder: false, published: true, stock: 5, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-4', isbn: '9780735211292', title: 'Atomic Habits', author: 'James Clear', genre: 'Self-Help', age: 'Adults', ageCategory: 'Adult', format: 'Paperback', price: '$45.00', cost: 26.50, synopsis: 'Tiny changes, remarkable results — a practical guide to building better habits.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780735211292-L.jpg', isPreOrder: false, published: true, stock: 12, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-5', isbn: '9781649374042', title: 'Fourth Wing', author: 'Rebecca Yarros', genre: 'Fantasy', age: 'Young Adult', ageCategory: 'Young Adult', format: 'Hard Cover', price: '$62.00', cost: 37.00, synopsis: 'A reluctant rider enters a deadly war college for dragon riders.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9781649374042-L.jpg', isPreOrder: false, published: true, stock: 3, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-6', isbn: '9781250416469', title: 'Marion', author: 'Leah Rowan', genre: 'Thriller', age: 'Adults', ageCategory: 'Adult', format: 'Hard Cover', price: '$75.00', cost: 44.00, synopsis: 'A fiendishly clever feminist remix of Psycho.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9781250416469-L.jpg', isPreOrder: true, published: false, stock: 0, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-7', isbn: '9780385547345', title: 'Lessons in Chemistry', author: 'Bonnie Garmus', genre: 'Historical Fiction', age: 'Adults', ageCategory: 'Adult', format: 'Paperback', price: '$48.00', cost: 28.00, synopsis: 'A brilliant chemist in the 1960s becomes the star of a cooking show.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780385547345-L.jpg', isPreOrder: false, published: true, stock: 4, location: 'Bookstore', isNewArrival: false },
-        { id: 'CAT-8', isbn: '9780593490143', title: 'Tomorrow, and Tomorrow, and Tomorrow', author: 'Gabrielle Zevin', genre: 'Literary Fiction', age: 'Adults', ageCategory: 'Adult', format: 'Paperback', price: '$46.00', cost: 27.00, synopsis: 'Two friends build a dazzling world through video games and life.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780593490143-L.jpg', isPreOrder: false, published: true, stock: 6, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-9', isbn: '9781982185824', title: "I'm Glad My Mom Died", author: 'Jennette McCurdy', genre: 'Memoir', age: 'Adults', ageCategory: 'Adult', format: 'Hard Cover', price: '$52.00', cost: 30.00, synopsis: 'A candid, darkly funny memoir of fame and a controlling parent.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9781982185824-L.jpg', isPreOrder: false, published: true, stock: 2, location: 'Bookstore', isNewArrival: false },
-        { id: 'CAT-10', isbn: '9781368057202', title: 'The Ballad of Songbirds and Snakes', author: 'Suzanne Collins', genre: 'Dystopian', age: 'Young Adult', ageCategory: 'Young Adult', format: 'Paperback', price: '$42.00', cost: 24.00, synopsis: 'A young Coriolanus Snow mentors a tribute in the 10th Hunger Games.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9781368057202-L.jpg', isPreOrder: false, published: true, stock: 5, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-11', isbn: '9781250816788', title: 'A Court of Thorns and Roses', author: 'Sarah J. Maas', genre: 'Fantasy Romance', age: 'Young Adult', ageCategory: 'Young Adult', format: 'Paperback', price: '$44.00', cost: 25.00, synopsis: 'A huntress is dragged to a magical land of fae and ancient curses.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9781250816788-L.jpg', isPreOrder: false, published: true, stock: 4, location: 'Bookstore', isNewArrival: false },
-        { id: 'CAT-12', isbn: '9781423101499', title: 'The Battle of the Labyrinth', author: 'Rick Riordan', genre: 'Fantasy', age: 'Middle Grade', ageCategory: 'Middle Grade', format: 'Paperback', price: '$35.00', cost: 18.00, synopsis: 'Percy Jackson must navigate the subterranean labyrinth.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9781423101499-L.jpg', isPreOrder: false, published: true, stock: 7, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-13', isbn: '9780786838653', title: 'The Lightning Thief', author: 'Rick Riordan', genre: 'Fantasy', age: 'Middle Grade', ageCategory: 'Middle Grade', format: 'Paperback', price: '$32.00', cost: 16.00, synopsis: 'Percy discovers he is a demigod and embarks on a quest across America.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780786838653-L.jpg', isPreOrder: false, published: true, stock: 8, location: 'Bookstore', isNewArrival: false },
-        { id: 'CAT-14', isbn: '9780545582889', title: "Harry Potter and the Sorcerer's Stone", author: 'J.K. Rowling', genre: 'Fantasy', age: 'Middle Grade', ageCategory: 'Middle Grade', format: 'Paperback', price: '$38.00', cost: 20.00, synopsis: 'An ordinary boy discovers he is a wizard and enters Hogwarts.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780545582889-L.jpg', isPreOrder: false, published: true, stock: 6, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-15', isbn: '9780064400554', title: "Charlotte's Web", author: 'E.B. White', genre: 'Classics', age: 'Middle Grade', ageCategory: 'Middle Grade', format: 'Paperback', price: '$28.00', cost: 14.00, synopsis: 'A pig, a spider, and the miracle of friendship on a farm.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780064400554-L.jpg', isPreOrder: false, published: true, stock: 5, location: 'Bookstore', isNewArrival: false },
-        { id: 'CAT-16', isbn: '9780064404990', title: 'The Giving Tree', author: 'Shel Silverstein', genre: 'Picture Book', age: 'Kids', ageCategory: 'Kids', format: 'Hard Cover', price: '$25.00', cost: 12.00, synopsis: 'A touching story of unconditional love.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780064404990-L.jpg', isPreOrder: false, published: true, stock: 9, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-17', isbn: '9780394800011', title: 'The Cat in the Hat', author: 'Dr. Seuss', genre: 'Picture Book', age: 'Kids', ageCategory: 'Kids', format: 'Hard Cover', price: '$22.00', cost: 11.00, synopsis: 'A mischievous cat turns a rainy day upside down.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780394800011-L.jpg', isPreOrder: false, published: true, stock: 10, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-18', isbn: '9780399226908', title: 'The Very Hungry Caterpillar', author: 'Eric Carle', genre: 'Picture Book', age: 'Kids', ageCategory: 'Kids', format: 'Hard Cover', price: '$24.00', cost: 12.00, synopsis: 'A caterpillar eats through the week and becomes a butterfly.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780399226908-L.jpg', isPreOrder: false, published: true, stock: 8, location: 'Bookstore', isNewArrival: false },
-        { id: 'CAT-19', isbn: '9780064430173', title: 'Where the Wild Things Are', author: 'Maurice Sendak', genre: 'Picture Book', age: 'Kids', ageCategory: 'Kids', format: 'Hard Cover', price: '$26.00', cost: 13.00, synopsis: 'Max sails to the land of the Wild Things and becomes their king.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780064430173-L.jpg', isPreOrder: false, published: true, stock: 7, location: 'Bookstore', isNewArrival: true },
-        { id: 'CAT-20', isbn: '9781529021424', title: 'Neighbours', author: 'Danielle Steel', genre: 'General Fiction', age: 'Adults', ageCategory: 'Adult', format: 'Paperback', price: '$40.00', cost: 22.00, synopsis: 'Unexpected friendships bloom in San Francisco.', imageUrl: 'https://i.ibb.co/S1N09F8/Neighbours.jpg', isPreOrder: false, published: true, stock: 3, location: 'Bookstore', isNewArrival: false },
-        // —— OWL / Orange Walk Library (borrowable) ——
-        { id: 'LIB-1', isbn: '9780141439518', title: 'Pride and Prejudice', author: 'Jane Austen', genre: 'Classics', age: 'Adults', ageCategory: 'Adult', format: 'Paperback', price: '$0.00', cost: 0, synopsis: 'Elizabeth Bennet navigates manners, upbringing, and romance in Regency England.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780141439518-L.jpg', isPreOrder: false, published: true, stock: 2, location: 'Library', available: true },
-        { id: 'LIB-2', isbn: '9780061120084', title: 'To Kill a Mockingbird', author: 'Harper Lee', genre: 'Classics', age: 'Adults', ageCategory: 'Adult', format: 'Paperback', price: '$0.00', cost: 0, synopsis: 'Scout Finch watches her father defend an innocent man in a small Southern town.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780061120084-L.jpg', isPreOrder: false, published: true, stock: 1, location: 'Library', available: true },
-        { id: 'LIB-3', isbn: '9780451524935', title: '1984', author: 'George Orwell', genre: 'Dystopian', age: 'Adults', ageCategory: 'Adult', format: 'Paperback', price: '$0.00', cost: 0, synopsis: 'Winston Smith challenges a totalitarian regime that rewrites truth.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780451524935-L.jpg', isPreOrder: false, published: true, stock: 2, location: 'Library', available: true },
-        { id: 'LIB-4', isbn: '9780316769488', title: 'The Catcher in the Rye', author: 'J.D. Salinger', genre: 'Literary Fiction', age: 'Young Adult', ageCategory: 'Young Adult', format: 'Paperback', price: '$0.00', cost: 0, synopsis: 'Holden Caulfield wanders New York after leaving prep school.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780316769488-L.jpg', isPreOrder: false, published: true, stock: 1, location: 'Library', available: true },
-        { id: 'LIB-5', isbn: '9780439023528', title: 'The Hunger Games', author: 'Suzanne Collins', genre: 'Dystopian', age: 'Young Adult', ageCategory: 'Young Adult', format: 'Paperback', price: '$0.00', cost: 0, synopsis: 'Katniss Everdeen volunteers for a televised fight to the death.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780439023528-L.jpg', isPreOrder: false, published: true, stock: 2, location: 'Library', available: true },
-        { id: 'LIB-6', isbn: '9780547928227', title: 'The Hobbit', author: 'J.R.R. Tolkien', genre: 'Fantasy', age: 'Middle Grade', ageCategory: 'Middle Grade', format: 'Paperback', price: '$0.00', cost: 0, synopsis: 'Bilbo Baggins joins dwarves on a quest to reclaim a dragon’s treasure.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780547928227-L.jpg', isPreOrder: false, published: true, stock: 2, location: 'Library', available: true },
-        { id: 'LIB-7', isbn: '9780064400554', title: "Charlotte's Web", author: 'E.B. White', genre: 'Classics', age: 'Middle Grade', ageCategory: 'Middle Grade', format: 'Paperback', price: '$0.00', cost: 0, synopsis: 'A pig, a spider, and the miracle of friendship on a farm.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780064400554-L.jpg', isPreOrder: false, published: true, stock: 1, location: 'Library', available: true },
-        { id: 'LIB-8', isbn: '9780060256654', title: 'Where the Wild Things Are', author: 'Maurice Sendak', genre: 'Picture Book', age: 'Kids', ageCategory: 'Kids', format: 'Hard Cover', price: '$0.00', cost: 0, synopsis: 'Max sails to the land of the Wild Things and becomes their king.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780060256654-L.jpg', isPreOrder: false, published: true, stock: 2, location: 'Library', available: true },
-        { id: 'LIB-9', isbn: '9780394800165', title: 'Green Eggs and Ham', author: 'Dr. Seuss', genre: 'Picture Book', age: 'Kids', ageCategory: 'Kids', format: 'Hard Cover', price: '$0.00', cost: 0, synopsis: 'Sam-I-Am insists you try green eggs and ham — in a box, with a fox…', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780394800165-L.jpg', isPreOrder: false, published: true, stock: 2, location: 'Library', available: true },
-        { id: 'LIB-10', isbn: '9780142414934', title: 'Matilda', author: 'Roald Dahl', genre: 'Children’s Fiction', age: 'Middle Grade', ageCategory: 'Middle Grade', format: 'Paperback', price: '$0.00', cost: 0, synopsis: 'A brilliant girl outsmarts cruel adults with wit and a little magic.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780142414934-L.jpg', isPreOrder: false, published: true, stock: 1, location: 'Library', available: true },
-        { id: 'LIB-11', isbn: '9780060850524', title: 'Brave New World', author: 'Aldous Huxley', genre: 'Dystopian', age: 'Adults', ageCategory: 'Adult', format: 'Paperback', price: '$0.00', cost: 0, synopsis: 'A engineered society of pleasure and control — and one man who resists.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9780060850524-L.jpg', isPreOrder: false, published: true, stock: 1, location: 'Library', available: true },
-        { id: 'LIB-12', isbn: '9781501142970', title: 'It Ends with Us', author: 'Colleen Hoover', genre: 'Contemporary Romance', age: 'Adults', ageCategory: 'Adult', format: 'Paperback', price: '$0.00', cost: 0, synopsis: 'Lily’s past and present collide as she fights for a life free of abuse.', imageUrl: 'https://covers.openlibrary.org/b/isbn/9781501142970-L.jpg', isPreOrder: false, published: true, stock: 1, location: 'Library', available: true }
-      ],
+      catalog: [{"id": "SVC-MEMBER", "title": "Annual Membership ($75)", "author": "", "genre": "Membership", "age": "Adult", "ageCategory": "Adult", "format": "Service", "price": "$75.00", "cost": 0, "synopsis": "Orange Walk Library / Los Bookies annual membership.", "imageUrl": "", "stock": 999, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": true, "available": true}, {"id": "SVC-SHIP", "title": "Shipping", "author": "", "genre": "Shipping", "age": "Adult", "ageCategory": "Adult", "format": "Service", "price": "$10.00", "cost": 0, "synopsis": "Delivery / shipping fee.", "imageUrl": "", "stock": 999, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": true, "available": true}, {"id": "ISBN-9781250416469", "isbn": "9781250416469", "title": "Marion", "author": "Leah Rowan", "genre": "Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$75.00", "cost": 12.0, "synopsis": "A fiendishly clever feminist remix of Psycho. Rowan’s bold take on Hitchcock’s classic benefits from wicked humor, a well-rounded heroine fueled by righteous anger, and a breakneck pace", "imageUrl": "https://i.ibb.co/5zt2cDJ/Marion.jpg", "stock": 3, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781529021424", "isbn": "9781529021424", "title": "Neighbours", "author": "Danielle Steel", "genre": "Contemporary Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paperback", "price": "$40.00", "cost": 12.0, "synopsis": "In Danielle Steel's novel Neighbours, a reclusive former Hollywood star opens her undamaged San Francisco home to her displaced neighbors following a devastating earthquake, forging unexpected connections and uncovering secrets that help them heal from their pasts.", "imageUrl": "https://i.ibb.co/S1N09F8/Neighbours.jpg", "stock": 3, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9798990442627", "isbn": "9798990442627", "title": "The Tiger and the Crane", "author": "Shaolin Grandmaster", "genre": "Fantasy", "age": "Kids", "ageCategory": "Kids", "format": "Paper Back", "price": "$45.00", "cost": 12.0, "synopsis": "Test, Test, testTest, Test, testTest, Test, testTest, Test, testTest, Test, testTest, Test, testTest, Test, testTest, Test, testTest, Test, testTest, Test, testTest, Test, testTest, Test, test", "imageUrl": "https://i.ibb.co/tpm6K4hR/The-Tiger-and-the-Crane.jpg", "stock": 3, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781250132369", "isbn": "9781250132369", "title": "Behind Closed Doors", "author": "B.A. Paris", "genre": "Psychological Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "A woman appears to have the perfect marriage, but dark secrets trap her behind closed doors.", "imageUrl": "https://i.ibb.co/Gv7WwXSP/Behind-Closed-Doors.jpg", "stock": 2, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780062267535", "isbn": "9780062267535", "title": "The Kind Worth Killing", "author": "Peter Swanson", "genre": "Psychological Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "Two strangers strike up a conversation on a flight and plot the murder of an unfaithful spouse.", "imageUrl": "https://i.ibb.co/M5SZsCqy/The-Kind-Worth-Killing.jpg", "stock": 2, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781529021721", "isbn": "9781529021721", "title": "The Butler", "author": "Danielle Steel", "genre": "Contemporary Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "A young man finds healing and unexpected romance while working as a butler for a wealthy family.", "imageUrl": "https://i.ibb.co/fYcKcjk1/The-Butler.jpg", "stock": 2, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781529021783", "isbn": "9781529021783", "title": "Flying Angels", "author": "Danielle Steel", "genre": "Historical Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Courageous nurses risk their lives to rescue wounded soldiers aboard medical transport planes in WWII.", "imageUrl": "https://i.ibb.co/5Xq04mSc/Flying-Angels.jpg", "stock": 2, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781529021844", "isbn": "9781529021844", "title": "Invisible", "author": "Danielle Steel", "genre": "Contemporary Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "An aspiring filmmaker overcomes a childhood in her sister's shadow to pursue her cinematic dreams.", "imageUrl": "https://i.ibb.co/7tnH5GJ2/Invisible.jpg", "stock": 2, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781250768889", "isbn": "9781250768889", "title": "Cinder (The Lunar Chronicles, 1)", "author": "Marissa Meyer", "genre": "YA Sci-Fi", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "A gifted cyborg mechanic in New Beijing discovers secrets that make her the center of an interplanetary war.", "imageUrl": "https://i.ibb.co/DH6n5cV5/Cinder-The-Lunar-Chronicles-1.jpg", "stock": 2, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781419741869", "isbn": "9781419741869", "title": "Diary of a Wimpy Kid - Rodrick Rules", "author": "Jeff Kinney", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Hard Cover", "price": "$45.00", "cost": 12.0, "synopsis": "Greg Heffley tries to survive middle school while his older brother Rodrick threatens to reveal his embarrassing secret.", "imageUrl": "https://i.ibb.co/1JhSS4nz/Diary-of-a-Wimpy-Kid-Rodrick-Rules.jpg", "stock": 2, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781641709156", "isbn": "9781641709156", "title": "The Blue Canoe", "author": "Sheryl McFarlane", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Hard Cover", "price": "$40.00", "cost": 12.0, "synopsis": "A gentle children's story celebrating summer adventures and grandfatherly love on tranquil waters.", "imageUrl": "https://i.ibb.co/Y45PRwPR/The-Blue-Canoe.jpg", "stock": 2, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781423101505", "isbn": "9781423101505", "title": "The Last Olympian", "author": "Rick Riordan", "genre": "Fantasy", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$35.00", "cost": 12.0, "synopsis": "Percy Jackson and his demigod friends make their final stand to protect Mount Olympus from Kronos's army.", "imageUrl": "https://i.ibb.co/1G26f34G/The-Last-Olympian.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781423101499", "isbn": "9781423101499", "title": "The Battle of the Labyrinth", "author": "Rick Riordan", "genre": "Fantasy", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$35.00", "cost": 12.0, "synopsis": "Percy navigates Daedalus's subterranean labyrinth to stop Kronos's army from invading Camp Half-Blood.", "imageUrl": "https://i.ibb.co/nqxTc6Y6/The-Battle-of-the-Labyrinth.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781423101482", "isbn": "9781423101482", "title": "The Titan's Curse", "author": "Rick Riordan", "genre": "Fantasy", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$35.00", "cost": 12.0, "synopsis": "Percy leads a perilous quest to rescue the goddess Artemis and his kidnapped friend Annabeth.", "imageUrl": "https://i.ibb.co/FL9hQWVS/The-Titan-s-Curse.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781423103349", "isbn": "9781423103349", "title": "Sea of Monsters", "author": "Rick Riordan", "genre": "Fantasy", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$35.00", "cost": 12.0, "synopsis": "Percy journeys across the treacherous Bermuda Triangle to find the Golden Fleece and save his camp.", "imageUrl": "https://i.ibb.co/Xr9vh2Yf/Sea-of-Monsters.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780440421245", "isbn": "9780440421245", "title": "The Prophet of Yonwood (City of Ember)", "author": "Jeanne DuPrau", "genre": "Dystopian Fiction", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$25.00", "cost": 12.0, "synopsis": "A prequel explaining the global tensions and religious visions that led to the creation of Ember.", "imageUrl": "https://i.ibb.co/20jRF0YC/The-Prophet-of-Yonwood-City-of-Ember.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780375828256", "isbn": "9780375828256", "title": "The People of Sparks (City of Ember)", "author": "Jeanne DuPrau", "genre": "Dystopian Fiction", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$25.00", "cost": 12.0, "synopsis": "Lina and Doon lead Ember's refugees into a surface village where resources and peace quickly dwindle.", "imageUrl": "https://i.ibb.co/fYbKjDTr/The-People-of-Sparks-City-of-Ember.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780375822742", "isbn": "9780375822742", "title": "The City of Ember", "author": "Jeanne DuPrau", "genre": "Dystopian Fiction", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$25.00", "cost": 12.0, "synopsis": "Two children race against time to decode ancient instructions before their underground city's lights go out forever.", "imageUrl": "https://i.ibb.co/zHPYh7wg/The-City-of-Ember.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780062427021", "isbn": "9780062427021", "title": "Her Every Fear", "author": "Peter Swanson", "genre": "Psychological Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$70.00", "cost": 12.0, "synopsis": "An anxiety-ridden woman swaps Boston apartments with her cousin, only to find a murdered neighbor next door.", "imageUrl": "https://i.ibb.co/dsS8kp00/Her-every.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780063274822", "isbn": "9780063274822", "title": "My Husband", "author": "Maud Ventura", "genre": "Psychological Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$65.00", "cost": 12.0, "synopsis": "A wife obsessively tracks every minute detail of her marriage to prove whether her husband still truly loves her.", "imageUrl": "https://i.ibb.co/Zz5m3CkL/My-Husband.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781668096901", "isbn": "9781668096901", "title": "A Sociopath's Guide to A Successful Marriage", "author": "C.J. Leede", "genre": "Dark Comedy Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$75.00", "cost": 12.0, "synopsis": "A wickedly satirical look into the calculated mind of a high-functioning sociopath navigating domestic partnership.", "imageUrl": "https://i.ibb.co/HpbCp83R/A-Sociopath-s-Guide-to-A-Successful-Marriage.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780744083903", "isbn": "9780744083903", "title": "Anthology of Earth", "author": "Ben Hoare", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Hard Cover", "price": "$85.00", "cost": 12.0, "synopsis": "A visual encyclopedia celebrating the natural wonders, geology, landscapes, and phenomena of planet Earth.", "imageUrl": "https://i.ibb.co/WNcy9j4n/Anthology-of-Earth.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781503751866", "isbn": "9781503751866", "title": "Baby Einstein - My First Library", "author": "Pi Kids", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Hard Cover", "price": "$85.00", "cost": 12.0, "synopsis": "A 12-board-book collection introducing toddlers to colors, animals, shapes, and early vocabulary words.", "imageUrl": "https://i.ibb.co/ynQhZB8X/Baby-Einstein-My-First-Library.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781638493655", "isbn": "9781638493655", "title": "Dungeon Crawler Carl", "author": "Matt Dinniman", "genre": "Sci-Fi", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$60.00", "cost": 12.0, "synopsis": "Carl and his ex-girlfriend's cat Princess Donut must survive an alien television gameshow inside a deadly subterranean dungeon.", "imageUrl": "https://i.ibb.co/JW6ghMgc/Dungeon-Crawler-Carl.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780593752258", "isbn": "9780593752258", "title": "Bluey Box Set", "author": "Penguin Young", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Box Set", "price": "$55.00", "cost": 12.0, "synopsis": "Four pocket-sized board books featuring Bluey, Bingo, Bandit, and Chilli having fun family adventures.", "imageUrl": "https://i.ibb.co/Mk2njk9C/Bluey-Box-Set.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781465485366", "isbn": "9781465485366", "title": "The Wonders of Nature", "author": "Ben Hoare", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Hard Cover", "price": "$80.00", "cost": 12.0, "synopsis": "An illustrated treasury documenting over 100 remarkable animals, plants, and natural artifacts across the globe.", "imageUrl": "https://i.ibb.co/20k5jqnW/The-Wonders-of-Nature.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781638932024", "isbn": "9781638932024", "title": "The Burial Tide", "author": "Neil Gaiman", "genre": "Dark Fantasy / Mystery", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$0.00", "cost": 12.0, "synopsis": "A coastal community faces supernatural horrors washing ashore on the mysterious nocturnal tide.", "imageUrl": "https://i.ibb.co/ycJgFh16/The-Burial-Tide.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780744059830", "isbn": "9780744059830", "title": "The Secret World of Plants", "author": "Ben Hoare", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Hard Cover", "price": "$85.00", "cost": 12.0, "synopsis": "Explores the weird and wonderful lives of plants, from carnivorous flora to towering forest giants.", "imageUrl": "https://i.ibb.co/yF4BWnC0/The-Secret-World-of-Plants.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9798217181629", "isbn": "9798217181629", "title": "A Pack for Autumn", "author": "Cate Corvin", "genre": "Paranormal Romance", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "A werewolf romance following an exiled shifter finding protection and passion in a rival seasonal pack.", "imageUrl": "https://i.ibb.co/pkrmcSX/A-Pack-for-Autumn.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780316404068", "isbn": "9780316404068", "title": "The Killer Inside Me", "author": "Jim Thompson", "genre": "Crime Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "A small-town Texas deputy hides his sadistic sociopathy behind a genial smile and deadly charm.", "imageUrl": "https://i.ibb.co/PkdNsbJ/The-Killer-Inside-Me.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780008536695", "isbn": "9780008536695", "title": "How to Kill Men and Get Away With It", "author": "Katy Brent", "genre": "Dark Comedy Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "An elite millennial influencer accidentally kills a predator and decides to become a serial vigilante.", "imageUrl": "https://i.ibb.co/Dg85yPQc/How-to-Kill-Men-and-Get-Away-With-It.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781837005048", "isbn": "9781837005048", "title": "Body Count - Arran's Obsession", "author": "B.B. Reid", "genre": "Dark Romance", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "A high-stakes dark romance following dangerous alliances, intense rivalry, and intoxicating obsession.", "imageUrl": "https://i.ibb.co/DDSXQVpJ/Body-Count-Amen-s-Obsession.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780684850023", "isbn": "9780684850023", "title": "Write It Down, Make It Happen", "author": "Henriette Klauser", "genre": "Self-Growth / Productivity", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "A practical guide showing how committing dreams and goals to paper triggers subconscious success.", "imageUrl": "https://i.ibb.co/tPLg73Hs/Write-It-Down-Make-It-Happen.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781101985540", "isbn": "9781101985540", "title": "UNSUB", "author": "Meg Gardiner", "genre": "Crime Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "A supernatural intrigue filled with wit, shape-shifters, and aristocratic espionage.", "imageUrl": "https://i.ibb.co/991XQ2pR/unsub.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780316153621", "isbn": "9780316153621", "title": "Belladonna", "author": "Adalyn Grace", "genre": "Gothic Fantasy Romance", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$45.00", "cost": 12.0, "synopsis": "An orphaned girl immune to poison teams up with Death himself to solve an aristocratic murder.", "imageUrl": "https://i.ibb.co/7xztFtR7/Belladonna.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781250774057", "isbn": "9781250774057", "title": "Fairest (The Lunar Chronicles)", "author": "Marissa Meyer", "genre": "YA Sci-Fi", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "The villainous origin story of Queen Levana and her tragic, ruthless ascent to the Lunar throne.", "imageUrl": "https://i.ibb.co/8nZjp6H5/Fairest-The-Lunar-Chronicles.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781800504943", "isbn": "9781800504943", "title": "Religion: Death & the Senses", "author": "Christina Welch", "genre": "Psychological Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$85.00", "cost": 12.0, "synopsis": "A gritty exploration of addiction, trauma, sensory perceptions, and redemption in the shadows.", "imageUrl": "https://i.ibb.co/ZzmNmNg9/religion.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780425232200", "isbn": "9780425232200", "title": "The Help PB", "author": "Kathryn Stockett", "genre": "Historical Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "Three women in 1960s Mississippi cross racial lines to write a tell-all book about working for wealthy families.", "imageUrl": "https://i.ibb.co/5XQt5fXq/The-Help.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781941360453", "isbn": "9781941360453", "title": "Elegy for the Undead", "author": "Matthew Vesely", "genre": "Horror / Novella", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "A tender, heartbreaking story of a married couple coping after one of them is bitten by a zombie.", "imageUrl": "https://i.ibb.co/nsjXRKKW/Elegy-for-the-Undead.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781250252715", "isbn": "9781250252715", "title": "Razorblade Tears", "author": "S.A. Cosby", "genre": "Crime Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "Two ex-cons team up to avenge their murdered gay sons on a violent, unforgiving path of retribution.", "imageUrl": "https://i.ibb.co/xd5YsWJ/Razorblade-Tears.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781907127120", "isbn": "9781907127120", "title": "Wuthering Heights", "author": "Emily Brontë", "genre": "Classic Literature", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$60.00", "cost": 12.0, "synopsis": "A dynamic comic-strip adaptation of the turbulent, obsessive romance between Heathcliff and Catherine.", "imageUrl": "https://covers.openlibrary.org/b/isbn/9781907127120-L.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781399745369", "isbn": "9781399745369", "title": "ITCHI", "author": "Gemma Amor", "genre": "Contemporary Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$70.00", "cost": 12.0, "synopsis": "An intense suspense thriller tracing psychological obsession and deadly retribution across borders.", "imageUrl": "https://i.ibb.co/RTDZdm4s/itch.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9798330214556", "isbn": "9798330214556", "title": "Bright Beginnings", "author": "Fern Britton", "genre": "Contemporary Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Paper Back", "price": "$30.00", "cost": 12.0, "synopsis": "A heartwarming tale of second chances, community solidarity, and newfound romance in a Cornish village.", "imageUrl": "https://i.ibb.co/6R8ctBsS/Bright-Beginnings.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781338201123", "isbn": "9781338201123", "title": "Mortal Engines", "author": "Philip Reeve", "genre": "Dystopian Sci-Fi", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$45.00", "cost": 12.0, "synopsis": "In a post-apocalyptic future, giant motorized cities roam a wasteland devouring smaller settlements for fuel.", "imageUrl": "https://i.ibb.co/0jW6wzq9/Mortal-Engines.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780593820285", "isbn": "9780593820285", "title": "The Dungeon Anarchist's Cookbook #3)", "author": "Matt Dinniman", "genre": "Sci-Fi", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$70.00", "cost": 12.0, "synopsis": "Carl and Princess Donut navigate the treacherous 4th level of the dungeon using makeshift explosives and defiance.", "imageUrl": "https://i.ibb.co/JR3fFgk7/The-Dungeon-Anarchist-s-Cookbook-3.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781250774064", "isbn": "9781250774064", "title": "Stars Above (The Lunar Chronicles, 5)", "author": "Marissa Meyer", "genre": "YA Sci-Fi", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Nine enchanting short stories expanding the backstories and epilogues of the Lunar Chronicles universe.", "imageUrl": "https://i.ibb.co/XZcRmqQ7/Stars-Above-The-Lunar-Chronicles-5.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781250768926", "isbn": "9781250768926", "title": "Winter (The Lunar Chronicles, 4)", "author": "Marissa Meyer", "genre": "YA Sci-Fi", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Princess Winter and the Lunar crew launch an all-out revolution to dethrone Queen Levana once and for all.", "imageUrl": "https://i.ibb.co/G4rcgQYs/Winter-The-Lunar-Chronicles-4.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781250768902", "isbn": "9781250768902", "title": "Cress (The Lunar Chronicles, 3)", "author": "Marissa Meyer", "genre": "YA Sci-Fi", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "An expert hacker imprisoned on a satellite joins Cinder to prevent Queen Levana's forced royal wedding.", "imageUrl": "https://i.ibb.co/KxVsGvjs/Cress-The-Lunar-Chronicles-3.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781250768896", "isbn": "9781250768896", "title": "Scarlet (The Lunar Chronicles, 2)", "author": "Marissa Meyer", "genre": "YA Sci-Fi", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Scarlet Benoit teams up with a street fighter named Wolf to find her missing grandmother and joins forces with Cinder.", "imageUrl": "https://i.ibb.co/ynx8tC19/Scarlet-The-Lunar-Chronicles-2.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781529022087", "isbn": "9781529022087", "title": "High Stakes", "author": "Danielle Steel", "genre": "Contemporary Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Five successful women at a premier boutique literary agency navigate complex personal lives and cutthroat ambition.", "imageUrl": "https://i.ibb.co/vCDZZSyM/High-Stakes.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780593622469", "isbn": "9780593622469", "title": "Sense and Sensibility (Puffin in Bloom)", "author": "Jane Austen", "genre": "Classic Literature", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Hard Cover", "price": "$55.00", "cost": 12.0, "synopsis": "Sisters Elinor and Marianne Dashwood navigate heartbreak, social status, and true love in Regency England.", "imageUrl": "https://i.ibb.co/0L0kk7D/Sense-and-Sensibility-Puffin-in-Bloom.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780062968975", "isbn": "9780062968975", "title": "Scary Stories to Tell in the Dark", "author": "Alvin Schwartz", "genre": "Horror", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Hard Cover", "price": "$65.00", "cost": 12.0, "synopsis": "A chilling collection of traditional American folklore, spooky urban legends, and eerie tales.", "imageUrl": "https://i.ibb.co/Y4xstzqB/Scary-Stories-to-Tell-in-the-Dark.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780525564201", "isbn": "9780525564201", "title": "My Sister, the Serial Killer", "author": "Oyinkan Braithwaite", "genre": "Crime Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$45.00", "cost": 12.0, "synopsis": "A Nigerian nurse is called upon to clean up after her beautiful sister repeatedly murders her boyfriends.", "imageUrl": "https://i.ibb.co/4ZwZKcP2/My-Sister-the-Serial-Killer.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780593418918", "isbn": "9780593418918", "title": "The God of the Woods", "author": "Liz Moore", "genre": "Mystery / Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$60.00", "cost": 12.0, "synopsis": "When a teenager vanishes from an Adirondack summer camp in 1975, long-buried family secrets unravel.", "imageUrl": "https://i.ibb.co/23J4TFkn/The-God-of-the-Woods.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780060896447", "isbn": "9780060896447", "title": "The Stupidest Angel", "author": "Christopher Moore", "genre": "Contemporary Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$70.00", "cost": 12.0, "synopsis": "A moving portrait of memory, grief, and budding hope captured through the lens of young photographers.", "imageUrl": "https://i.ibb.co/k65PkYgs/Stupidest.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781338149081", "isbn": "9781338149081", "title": "Goosebumps Retro Set", "author": "R.L. Stine", "genre": "Horror", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Box Set", "price": "$125.00", "cost": 12.0, "synopsis": "A collectible tin box set containing five classic 90s Goosebumps monster and haunt stories.", "imageUrl": "https://i.ibb.co/3mJwb440/Goosebumps-Retro-Set.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781416558491", "isbn": "9781416558491", "title": "Bloodsucking Fiends", "author": "Christopher Moore", "genre": "Horror", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "A newly turned vampire in San Francisco hires a goofy grocery clerk as her daytime assistant.", "imageUrl": "https://i.ibb.co/rGWx397K/Bloodsucking-Fiends.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780593101032", "isbn": "9780593101032", "title": "Too Old for This", "author": "Samantha Downing", "genre": "Horror", "age": "Adult", "ageCategory": "Adult", "format": "Box Set", "price": "$60.00", "cost": 12.0, "synopsis": "A curated boxed set of ten pulse-pounding supernatural mysteries and teen horror classics.", "imageUrl": "https://i.ibb.co/QFNBGGrf/Too-old.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780060590321", "isbn": "9780060590321", "title": "Fool", "author": "Christopher Moore", "genre": "Comedy", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "A fast-paced crime procedural tracking high-speed escapes, corruption, and perilous investigations.", "imageUrl": "https://i.ibb.co/JjCxf5hK/Fast.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780778387213", "isbn": "9780778387213", "title": "The Ex-Girlfriend Murder Club", "author": "Gloria Chao", "genre": "Mystery / Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "Three very different ex-girlfriends unite to clear their names when their mutual ex is found dead.", "imageUrl": "https://i.ibb.co/fVTk2ShG/The-Ex-Girlfriend-Murder-Club.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780061779732", "isbn": "9780061779732", "title": "Bite Me", "author": "Christopher Moore", "genre": "Horror", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$45.00", "cost": 12.0, "synopsis": "A hilariously chaotic vampire cat infests San Francisco, sparking a wild nocturnal extermination spree.", "imageUrl": "https://i.ibb.co/DgRHb1RG/Bite-Me.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780060735425", "isbn": "9780060735425", "title": "Practical Demonkeeping", "author": "Christopher Moore", "genre": "Horror", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "A perpetually young man seeks to rid himself of Catch, an insatiable man-eating demon he accidentally summoned.", "imageUrl": "https://i.ibb.co/rGBJ13gd/Practical-Demonkeeping.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780060590307", "isbn": "9780060590307", "title": "You Suck", "author": "Christopher Moore", "genre": "Horror", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$60.00", "cost": 12.0, "synopsis": "Jody and Tommy adjust to their newly immortal undead status while coping with vampire hunters and awkward roommates.", "imageUrl": "https://i.ibb.co/Xfrq8WmV/You-Suck.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781338678833", "isbn": "9781338678833", "title": "Animorphs Retro Tin Set", "author": "K.A. Applegate", "genre": "Sci-Fi", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Box Set", "price": "$125.00", "cost": 12.0, "synopsis": "Collector's tin set of five classic Animorphs adventures where teens morph into animals to battle alien parasites.", "imageUrl": "https://i.ibb.co/XfxBrTkd/Animorphs-Retro-Tin-Set.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780345419637", "isbn": "9780345419637", "title": "The Tale of the Body Thief", "author": "Anne Rice", "genre": "Horror", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$60.00", "cost": 12.0, "synopsis": "Despairing over his vampire nature, Lestat agrees to swap bodies with a psychic human, with catastrophic results.", "imageUrl": "https://i.ibb.co/Xxkrdk7F/The-Tale-of-the-Body-Thief.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780060735456", "isbn": "9780060735456", "title": "The Lust Lizard of Melancholy Cove", "author": "Christopher Moore", "genre": "Horror", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "A prehistoric sea monster awakens in a California town, secreting a potent pheromone of unrestrained lust.", "imageUrl": "https://i.ibb.co/rK0ZHLt3/The-Lust-Lizard-of-Melancholy-Cove.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781338878974", "isbn": "9781338878974", "title": "Harry Potter and the Half-Blood Prince", "author": "J.K. Rowling", "genre": "Fantasy", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Harry and Dumbledore explore Voldemort's past to discover the secret of his immortality while war looms.", "imageUrl": "https://i.ibb.co/M5GpwTfQ/Harry-Potter-and-the-Half-Blood-Prince.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781338878967", "isbn": "9781338878967", "title": "Harry Potter and the Order of the Phoenix", "author": "J.K. Rowling", "genre": "Fantasy", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Harry trains fellow students in secret defensive magic while facing ministry denial and sinister visions.", "imageUrl": "https://i.ibb.co/s9rvxYGm/Harry-Potter-and-the-Order-of-the-Phoenix.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780241381168", "isbn": "9780241381168", "title": "Diary of a Wimpy Kid - Third Wheel (Bk 7)", "author": "Jeff Kinney", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Paper Back", "price": "$30.00", "cost": 12.0, "synopsis": "Greg Heffley struggles when his best friend Rowley gets a girlfriend, turning to a Magic 8-Ball for advice.", "imageUrl": "https://i.ibb.co/nqq8GVnD/dowk.webp", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780241381151", "isbn": "9780241381151", "title": "Diary of a Wimpy Kid - Cabin Fever (Bk 6)", "author": "Jeff Kinney", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Paper Back", "price": "$30.00", "cost": 12.0, "synopsis": "Trapped indoors with his family during a massive blizzard, Greg faces school punishment for accidental damage.", "imageUrl": "https://i.ibb.co/zVw2PwLb/Diary-of-a-Wimpy-Kid-Cabin-Fever-Bk-6.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780241381120", "isbn": "9780241381120", "title": "Diary of a Wimpy Kid - Dog Days (Bk 4)", "author": "Jeff Kinney", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Paper Back", "price": "$30.00", "cost": 12.0, "synopsis": "Greg wants to spend his summer indoors playing video games, but his parents have other outdoor ideas.", "imageUrl": "https://i.ibb.co/PsG929F9/Diary-of-a-Wimpy-Kid-Dog-Days-Bk-4.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780241381113", "isbn": "9780241381113", "title": "Diary of a Wimpy Kid - The Last Straw (Bk 3)", "author": "Jeff Kinney", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Paper Back", "price": "$30.00", "cost": 12.0, "synopsis": "Greg's dad threatens to send him to military academy if he doesn't toughen up and show some discipline.", "imageUrl": "https://i.ibb.co/5hdrbRy6/Diary-of-a-Wimpy-Kid-The-Last-Straw-Bk-3.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780241381106", "isbn": "9780241381106", "title": "Diary of a Wimpy Kid - Rodrick Rules (2nd Edition)", "author": "Jeff Kinney", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Paper Back", "price": "$30.00", "cost": 12.0, "synopsis": "Greg tries to hide an embarrassing secret from summer camp that his big brother Rodrick knows all about.", "imageUrl": "https://i.ibb.co/1JhSS4nz/Diary-of-a-Wimpy-Kid-Rodrick-Rules.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781400336708", "isbn": "9781400336708", "title": "The Awe of God", "author": "John Bevere", "genre": "Christian", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$60.00", "cost": 12.0, "synopsis": "Invites believers to rediscover holy reverence and deep intimacy in their spiritual walk with God.", "imageUrl": "https://i.ibb.co/60mFksDx/The-Awe-of-God.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780590353403", "isbn": "9780590353403", "title": "Harry Potter and the Sorcerer's Stone", "author": "J.K. Rowling", "genre": "Fantasy", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Hard Cover", "price": "$65.00", "cost": 12.0, "synopsis": "An orphaned boy discovers he is a wizard and attends Hogwarts School of Witchcraft and Wizardry.", "imageUrl": "https://i.ibb.co/Z1dZMwbF/Harry-Potter-and-the-Sorcerer-s-Stone.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780743412285", "isbn": "9780743412285", "title": "Pet Sematary", "author": "Stephen King", "genre": "Horror", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "A grieving doctor buries his deceased son in a cursed Native American burial ground that brings things back wrong.", "imageUrl": "https://i.ibb.co/BKrS46hQ/Pet-Sematary.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781668021057", "isbn": "9781668021057", "title": "It Starts with Us", "author": "Colleen Hoover", "genre": "Contemporary Romance", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$55.00", "cost": 12.0, "synopsis": "Lily reconnects with her first love Atlas while dealing with her jealous ex-husband Ryle.", "imageUrl": "https://i.ibb.co/jkSKK29p/It-Starts-with-Us.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781984821799", "isbn": "9781984821799", "title": "The Wedding Planner", "author": "Danielle Steel", "genre": "Contemporary Romance", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "A premier wedding planner orchestrates lavish ceremonies for clients while remaining wary of her own romance.", "imageUrl": "https://i.ibb.co/Lm74yb6/The-Wedding-Planner.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781984821836", "isbn": "9781984821836", "title": "The Whittiers - Danielle Steel HC", "author": "Danielle Steel", "genre": "Contemporary Romance", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$60.00", "cost": 12.0, "synopsis": "A Russian oligarch's kept companion risks her luxurious life when she falls in love with a passionate artist.", "imageUrl": "https://i.ibb.co/bMwJFQ8K/whitters.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9798886087413", "isbn": "9798886087413", "title": "The Story of Women's History Box Set", "author": "Editorial Staff", "genre": "Historical Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Box Set", "price": "$150.00", "cost": 12.0, "synopsis": "Comprehensive multi-volume boxed collection honoring women leaders, pioneers, and historic movements.", "imageUrl": "https://i.ibb.co/VWbGcZWz/The-Story-of-Women-s-History-Box-Set.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780553808049", "isbn": "9780553808049", "title": "A Game of Thrones - The Illustrated Edition", "author": "George Martin", "genre": "Epic Fantasy", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$125.00", "cost": 12.0, "synopsis": "Noble families engage in deadly political war for the Iron Throne of Westeros as winter approaches.", "imageUrl": "https://i.ibb.co/yrRf4KQ/A-Game-of-Thrones-The-Illustrated-Edition.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780804172448", "isbn": "9780804172448", "title": "Station Eleven", "author": "Emily Mandel", "genre": "Post-Apocalyptic Sci-Fi", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$45.00", "cost": 12.0, "synopsis": "A traveling troupe of actors and musicians roams the Great Lakes region after a flu pandemic collapses civilization.", "imageUrl": "https://i.ibb.co/wFjn3dD0/Station-Eleven.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780060652937", "isbn": "9780060652937", "title": "The Screwtape Letters", "author": "C.S. Lewis", "genre": "Christian", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "A senior demon writes instructional letters to his novice nephew on how to tempt humans away from God.", "imageUrl": "https://i.ibb.co/RGMx6Rv1/The-Screwtape-Letters.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780671027032", "isbn": "9780671027032", "title": "How to Win Friends and Influence People", "author": "Dale Carnegie", "genre": "Self-Growth / Communication", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$45.00", "cost": 12.0, "synopsis": "Time-tested principles on active listening, inspiring enthusiasm, and building lasting personal relationships.", "imageUrl": "https://i.ibb.co/TD4VLNbc/How-to-Win-Friends-and-Influence-People.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781840227895", "isbn": "9781840227895", "title": "Peter Pan", "author": "J.M. Barrie", "genre": "Classic Literature", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Hard Cover", "price": "$55.00", "cost": 12.0, "synopsis": "The boy who refuses to grow up whisks the Darling children to Neverland for magical adventures with pirates.", "imageUrl": "https://i.ibb.co/hFVcMNs9/Peter-Pan.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781728274898", "isbn": "9781728274898", "title": "Twisted Lies", "author": "Ana Huang", "genre": "Dark Romance", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$45.00", "cost": 12.0, "synopsis": "A charming security expert and a shy artist enter a fake relationship that ignites deadly genuine desire.", "imageUrl": "https://i.ibb.co/zW7Lr8tX/Twisted-Lies.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781853260179", "isbn": "9781853260179", "title": "The Wind in the Willows", "author": "Kenneth Grahame", "genre": "Classic Literature", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$35.00", "cost": 12.0, "synopsis": "The pastoral adventures of Mole, Ratty, Badger, and the delightfully reckless Mr. Toad of Toad Hall.", "imageUrl": "https://i.ibb.co/M5pC54Qk/The-Wind-in-the-Willows.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781547604173", "isbn": "9781547604173", "title": "A Court of Thorns and Roses (Collector's Edition)", "author": "Sarah Maas", "genre": "Fantasy Romance", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$85.00", "cost": 12.0, "synopsis": "Human huntress Feyre is brought to the faerie realm of Prythian after killing a wolf, uncovering a deadly curse.", "imageUrl": "https://i.ibb.co/vx2gYdNV/A-Court-of-Thorns-and-Roses-Collector-s-Edition.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780062389503", "isbn": "9780062389503", "title": "The Jungle Book", "author": "Rudyard Kipling", "genre": "Classic Literature", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Hard Cover", "price": "$85.00", "cost": 12.0, "synopsis": "Interactive illustrated edition recounting Mowgli's feral upbringing among the wolves and Baloo the bear.", "imageUrl": "https://i.ibb.co/YFNQjDVy/The-Jungle-Book.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780446673549", "isbn": "9780446673549", "title": "Sex and the City", "author": "Candace Bushnell", "genre": "Contemporary Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "Witty essays on dating, romance, social status, and nightlife among cosmopolitan Manhattanites.", "imageUrl": "https://i.ibb.co/ycDcQnVp/Sex-and-the-City.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781464260100", "isbn": "9781464260100", "title": "Leave Me Behind Stenciled PB", "author": "K.M. Moronova", "genre": "Paranormal Romance", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "A gothic romance exploring forbidden passion against ancient castles and brooding Carpathian secrets.", "imageUrl": "https://i.ibb.co/60hss6Wr/Behind.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781335534620", "isbn": "9781335534620", "title": "Game Changer", "author": "Neal Shusterman", "genre": "Contemporary Fiction", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$60.00", "cost": 12.0, "synopsis": "A high school football hit catapults a teen through parallel universes where racial and social realities shift.", "imageUrl": "https://i.ibb.co/V0XbCdSt/Game-Changer.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780778387855", "isbn": "9780778387855", "title": "Hollow", "author": "Brian Catling", "genre": "Horror", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$70.00", "cost": 12.0, "synopsis": "Mercenaries guard a sacred religious oracle through a terrifying surreal landscape populated by monstrous visions.", "imageUrl": "https://i.ibb.co/QjCcyhDB/Hollow.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780062905277", "isbn": "9780062905277", "title": "The Adventures of Pinocchio", "author": "Carlo Collodi", "genre": "Classic Literature", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Hard Cover", "price": "$85.00", "cost": 12.0, "synopsis": "Deluxe MinaLima edition of the wooden puppet whose nose grows with lies as he strives to become a real boy.", "imageUrl": "https://i.ibb.co/dJfq9pNw/The-Adventures-of-Pinocchio.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781250379139", "isbn": "9781250379139", "title": "Blackthorn", "author": "J.T. Geissinger", "genre": "Fantasy", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$65.00", "cost": 12.0, "synopsis": "A woman returns to her sinister hometown and clashes with the dangerous heir of a rival family.", "imageUrl": "https://i.ibb.co/vCKCMJ48/Blackthorn.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780312382858", "isbn": "9780312382858", "title": "Patient Zero", "author": "Jonathan Maberry", "genre": "Sci-Fi / Zombie Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$60.00", "cost": 12.0, "synopsis": "Detective Joe Ledger is recruited into a black-ops agency to stop terrorists deploying a prion zombie virus.", "imageUrl": "https://i.ibb.co/mrk6rHw4/Patient-Zero.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780312367541", "isbn": "9780312367541", "title": "A Wrinkle in Time", "author": "Madeleine L'Engle", "genre": "Sci-Fi", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Meg Murry travels through space and fifth-dimensional tesseracts to rescue her father from cosmic darkness.", "imageUrl": "https://i.ibb.co/nMPsW7dk/A-Wrinkle-in-Time.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780525562627", "isbn": "9780525562627", "title": "The Testaments", "author": "Margaret Atwood", "genre": "Dystopian Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Fifteen years after Gilead's inception, three women's testimonies expose the totalitarian regime's inner decay.", "imageUrl": "https://i.ibb.co/Q46hHSq/The-Testaments.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781984898104", "isbn": "9781984898104", "title": "Carrie", "author": "Stephen King", "genre": "Horror", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "A bullied telekinetic high school girl unleashes violent retribution upon her tormentors at senior prom.", "imageUrl": "https://i.ibb.co/zTndSnXS/Carrie.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781853260612", "isbn": "9781853260612", "title": "Dr. Jekyll and Mr. Hyde", "author": "Robert Stevenson", "genre": "Gothic Classic", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$35.00", "cost": 12.0, "synopsis": "A London physician drinks a chemical concoction that liberates his cruel, uninhibited alter ego.", "imageUrl": "https://i.ibb.co/0yb3FqkZ/Dr-Jekyll-and-Mr-Hyde.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781853260230", "isbn": "9781853260230", "title": "Frankenstein (Wordsworth Classics)", "author": "Mary Shelley", "genre": "Gothic Classic", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$35.00", "cost": 12.0, "synopsis": "Victor Frankenstein animates a creature from graveyard remains, then recoils from the tragedy he unleashed.", "imageUrl": "https://i.ibb.co/8L1hySSJ/Frankenstein-Wordsworth-Classics.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781853260315", "isbn": "9781853260315", "title": "20,000 Leagues Under the Sea (Wordsworth Classics)", "author": "Jules Verne", "genre": "Classic Literature", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$35.00", "cost": 12.0, "synopsis": "Captain Nemo commands the futuristic submarine Nautilus on an epic voyage across the ocean depths.", "imageUrl": "https://i.ibb.co/VcTcSj7X/20-000-Leagues-Under-the-Sea-Wordsworth-Classics.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781840228335", "isbn": "9781840228335", "title": "Romeo & Juliet", "author": "William Shakespeare", "genre": "Classic Literature", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$55.00", "cost": 12.0, "synopsis": "Star-crossed lovers from warring Verona families risk everything for love, ending in fateful tragedy.", "imageUrl": "https://i.ibb.co/5gv3Fncm/Romeo-Juliet.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781840228007", "isbn": "9781840228007", "title": "Sense & Sensibility (Light Blue)", "author": "Jane Austen", "genre": "Classic Literature", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$55.00", "cost": 12.0, "synopsis": "The pragmatic Elinor and romantic Marianne Dashwood seek emotional fulfillment and financial security in England.", "imageUrl": "https://i.ibb.co/fYWzByXB/Sense-Sensibility-Light-Blue.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781668050415", "isbn": "9781668050415", "title": "Pretty Boys Are Poisonous", "author": "Megan Fox", "genre": "Contemporary Romance", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$55.00", "cost": 12.0, "synopsis": "Raw, vulnerable poetry illustrating toxic relationships, heartache, and the path to reclaiming self-worth.", "imageUrl": "https://i.ibb.co/hFY1Lnd0/Pretty-Boys-Are-Poisonous.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781646387663", "isbn": "9781646387663", "title": "Best-Loved Bible Stories 8-Book Library", "author": "Cottage Door", "genre": "Christian", "age": "Kids", "ageCategory": "Kids", "format": "Box Set", "price": "$200.00", "cost": 12.0, "synopsis": "Eight colorful board books introducing children to foundational biblical stories and teachings.", "imageUrl": "https://i.ibb.co/xqPdR81s/Best-Loved-Bible-Stories-8-Book-Library.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781501144189", "isbn": "9781501144189", "title": "Christine", "author": "Stephen King", "genre": "Horror", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "An awkward high school boy buys and restores a 1958 Plymouth Fury possessed by a murderous spirit.", "imageUrl": "https://i.ibb.co/whCrSJbD/Christine.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781496753168", "isbn": "9781496753168", "title": "Blood Slaves", "author": "Markus Redmond", "genre": "Supernatural Horror", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$55.00", "cost": 12.0, "synopsis": "A dramatic saga of warring kingdoms fighting for mystical bloodstones that grant battlefield power.", "imageUrl": "https://i.ibb.co/xSvjVYCN/Blood-Stones.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781473233539", "isbn": "9781473233539", "title": "Complete Sookie Stackhouse True Blood Series Box Set", "author": "Charlaine Harris", "genre": "Mythological Romance", "age": "Adult", "ageCategory": "Adult", "format": "Box Set", "price": "$400.00", "cost": 12.0, "synopsis": "The complete romantic retelling of the myth of Hades and Persephone in a modern supernatural Olympus.", "imageUrl": "https://i.ibb.co/BHKLD5gx/Sookie.webp", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781419766992", "isbn": "9781419766992", "title": "Diary of a Wimpy Kid - Rodrick Rules (#2 - Disney)", "author": "Jeff Kinney", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Hard Cover", "price": "$45.00", "cost": 12.0, "synopsis": "Greg Heffley navigates sibling warfare with his drummer older brother in this Disney-illustrated edition.", "imageUrl": "https://i.ibb.co/1JhSS4nz/Diary-of-a-Wimpy-Kid-Rodrick-Rules.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781419749155", "isbn": "9781419749155", "title": "Diary of a Wimpy Kid - Big Shot (#16 - White)", "author": "Jeff Kinney", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Hard Cover", "price": "$45.00", "cost": 12.0, "synopsis": "Greg reluctantly signs up for youth basketball and unexpectedly becomes the star of a ragtag team.", "imageUrl": "https://i.ibb.co/23V0Jwm6/Diary-of-a-Wimpy-Kid-Big-Shot-16-White.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781419741975", "isbn": "9781419741975", "title": "Diary of a Wimpy Kid - Double Down (#11)", "author": "Jeff Kinney", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Hard Cover", "price": "$45.00", "cost": 12.0, "synopsis": "Greg decides to make a scary movie to prove his creative talents and get his mom off his back.", "imageUrl": "https://i.ibb.co/S7c3gdvX/Diary-of-a-Wimpy-Kid-Double-Down-11.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781419741876", "isbn": "9781419741876", "title": "Diary of a Wimpy Kid - The Last Straw (#3 - Green)", "author": "Jeff Kinney", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Hard Cover", "price": "$45.00", "cost": 12.0, "synopsis": "Greg tries various schemes to impress his dad before he gets shipped off to Spag Union military school.", "imageUrl": "https://i.ibb.co/5hdrbRy6/Diary-of-a-Wimpy-Kid-The-Last-Straw-Bk-3.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781338267228", "isbn": "9781338267228", "title": "The Bad Guys Box Set", "author": "Aaron Blabey", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Paper Back", "price": "$135.00", "cost": 12.0, "synopsis": "A gang of misunderstood predator animals attempts good deeds to change their villainous public reputation.", "imageUrl": "https://i.ibb.co/C585PPh2/The-Bad-Guys-Box-Set.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780593651520", "isbn": "9780593651520", "title": "A Good Girl's Guide to Murder Box Set", "author": "Holly Jackson", "genre": "YA Mystery", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Box Set", "price": "$105.00", "cost": 12.0, "synopsis": "Pip Fitz-Amobi investigates closed murder cases in her sleepy English town, discovering dangerous truths.", "imageUrl": "https://i.ibb.co/cSmF3f3s/A-Good-Girl-s-Guide-to-Murder-Box-Set.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780593135228", "isbn": "9780593135228", "title": "Project Hail Mary", "author": "Andy Weir", "genre": "Sci-Fi", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$50.00", "cost": 12.0, "synopsis": "A lone surviving astronaut awakens light-years from Earth with amnesia, tasked with saving humanity from extinction.", "imageUrl": "https://i.ibb.co/VWv7FTV1/Project-Hail-Mary.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780307277671", "isbn": "9780307277671", "title": "The Da Vinci Code", "author": "Dan Brown", "genre": "Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Symbologist Robert Langdon races across Paris deciphering Da Vinci artworks to solve a secret society murder.", "imageUrl": "https://i.ibb.co/21MG05ff/The-Da-Vinci-Code.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780061992889", "isbn": "9780061992889", "title": "The Chronicles of Narnia Box Set", "author": "C.S. Lewis", "genre": "Fantasy", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Box Set", "price": "$225.00", "cost": 12.0, "synopsis": "The complete seven-book fantasy epic spanning the magical creation and destiny of the realm of Narnia.", "imageUrl": "https://i.ibb.co/tTXv1Wtw/The-Chronicles-of-Narnia-Box-Set.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780735231559", "isbn": "9780735231559", "title": "The Desolation of Devil's Acre", "author": "Ransom Riggs", "genre": "Fantasy", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "Jacob Portman and his peculiar friends wage their final war in Victorian London ruins against Caul's darkness.", "imageUrl": "https://i.ibb.co/xKhqFjyB/The-Desolation-of-Devil-s-Acre.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780439023528", "isbn": "9780439023528", "title": "The Hunger Games (Bk 1)", "author": "Suzanne Collins", "genre": "Dystopian Sci-Fi", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Katniss Everdeen volunteers to take her younger sister's place in a televised fight to the death.", "imageUrl": "https://i.ibb.co/4ZzQ5VD4/The-Hunger-Games-Bk-1.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781547613359", "isbn": "9781547613359", "title": "It's Only A Game", "author": "K.A. Reynolds", "genre": "YA Contemporary", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Hard Cover", "price": "$45.00", "cost": 12.0, "synopsis": "A high-stakes campus game blurs the line between virtual challenges and lethal real-world consequences.", "imageUrl": "https://i.ibb.co/ccnjm99Y/It-s-Only-A-Game.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780593725849", "isbn": "9780593725849", "title": "Exit Strategy", "author": "Martha Wells", "genre": "Sci-Fi", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$60.00", "cost": 12.0, "synopsis": "Murderbot journeys back to preserve the human crew that treated it like a person rather than machinery.", "imageUrl": "https://i.ibb.co/zTSSfvLL/Exit-Strategy.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781982117948", "isbn": "9781982117948", "title": "One for the Money", "author": "Janet Evanovich", "genre": "Mystery / Comedy", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$55.00", "cost": 12.0, "synopsis": "Stephanie Plum lands a job as a Trenton bounty hunter and tracks down an accused cop who broke her heart.", "imageUrl": "https://i.ibb.co/d0D2PnjQ/One-for-the-Money.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781594634741", "isbn": "9781594634741", "title": "City of Girls", "author": "Elizabeth Gilbert", "genre": "Historical Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "A flamboyant romp through 1940s New York City theater culture, female sexuality, and true friendship.", "imageUrl": "https://i.ibb.co/zVFZqkcQ/City-of-Girls.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780553448146", "isbn": "9780553448146", "title": "Artemis", "author": "Andy Weir", "genre": "Sci-Fi", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "A witty smuggler on the Moon's first lunar city gets caught up in a conspiracy for control of the metropolis.", "imageUrl": "https://i.ibb.co/d430G0NC/Artemis.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780312263126", "isbn": "9780312263126", "title": "Digital Fortress", "author": "Dan Brown", "genre": "Sci-Fi Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "An NSA cryptographer must break an unbreakable code threatening to compromise United States national intelligence.", "imageUrl": "https://i.ibb.co/k2VDpQvP/Digital-Fortress.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780345526779", "isbn": "9780345526779", "title": "Airframe", "author": "Michael Crichton", "genre": "Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "An aircraft accident investigator probes the mid-flight turbulence tragedy of a commercial airliner over the Pacific.", "imageUrl": "https://i.ibb.co/WpxTcMSg/Airframe.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780345538987", "isbn": "9780345538987", "title": "Jurassic Park", "author": "Michael Crichton", "genre": "Sci-Fi Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Genetically engineered dinosaurs escape captivity on a private island amusement park, terrorizing the visitors.", "imageUrl": "https://i.ibb.co/j92wKsv0/Jurassic-Park.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781728252254", "isbn": "9781728252254", "title": "Last Night At The Hollywood Canteen", "author": "C.J. Archer", "genre": "Historical Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$35.00", "cost": 12.0, "synopsis": "A glamorous WWII Hollywood volunteer investigates the shocking murder of a decorated war hero.", "imageUrl": "https://i.ibb.co/2xhTNdT/Last-Night-At-The-Hollywood-Canteen.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780593129920", "isbn": "9780593129920", "title": "Hondo", "author": "Louis L'Amour", "genre": "Historical Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$35.00", "cost": 12.0, "synopsis": "Army scout Hondo Lane protects an isolated homesteader and her son on the Apache-threatened frontier.", "imageUrl": "https://i.ibb.co/gbWpSMYZ/Hondo.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9798886050745", "isbn": "9798886050745", "title": "Steal Fire From the Gods", "author": "James Frey", "genre": "Fantasy", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "A high-stakes thriller exploring extreme courage, underground rebellions, and the cost of enlightenment.", "imageUrl": "https://i.ibb.co/5gW6Mz0M/Steal-Fire-From-the-Gods.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780307947307", "isbn": "9780307947307", "title": "The Stand (Orange)", "author": "Stephen King", "genre": "Post-Apocalyptic Horror", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "A devastating plague destroys humanity, pitting the survivors in a biblical battle between good and evil.", "imageUrl": "https://i.ibb.co/chMfMbvW/The-Stand-Orange.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9798991823524", "isbn": "9798991823524", "title": "These Hallowed Binds", "author": "A. M. Daylin", "genre": "Sci-Fi", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "A visionary vision of future planetary survival, cybernetic law enforcement, and biological renewal.", "imageUrl": "https://i.ibb.co/zhMTWjyN/These-Hallowed-Knots.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781953002365", "isbn": "9781953002365", "title": "Oriana", "author": "Anastasia Rubis", "genre": "Fantasy", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$55.00", "cost": 12.0, "synopsis": "Magically animated toys embark on a dangerous journey to save their kindred from dark, malicious playthings.", "imageUrl": "https://i.ibb.co/B5FB8G1X/orian.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781662893148", "isbn": "9781662893148", "title": "The Perch HC", "author": "B. Butts Williams", "genre": "Contemporary Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$45.00", "cost": 12.0, "synopsis": "A family reflections story on generational wisdom, Southern porch evenings, and enduring faith.", "imageUrl": "https://i.ibb.co/F439BK2J/The-Perch-HC.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780061992278", "isbn": "9780061992278", "title": "The One and Only Ivan", "author": "Katherine Applegate", "genre": "Children's Fiction", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$45.00", "cost": 12.0, "synopsis": "A captive silverback gorilla decides to help a baby elephant escape their mall enclosure.", "imageUrl": "https://i.ibb.co/0R8XC95N/The-One-and-Only-Ivan.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781649377371", "isbn": "9781649377371", "title": "Fourth Wing (PB)", "author": "Rebecca Yarros", "genre": "Fantasy Romance", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "Twenty-year-old Violet Sorrengail enters the deadly dragon rider quadrant where only the strongest survive.", "imageUrl": "https://i.ibb.co/gb8NNnCc/Fourth-Wing.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781459823983", "isbn": "9781459823983", "title": "Genie Meanie PB", "author": "Mahtab Narsimhan", "genre": "Graphic Novel", "age": "Kids", "ageCategory": "Kids", "format": "Paper Back", "price": "$22.00", "cost": 12.0, "synopsis": "A beginner-friendly drawing guide providing step-by-step cartooning and character creation techniques.", "imageUrl": "https://i.ibb.co/wZJnFTGk/genie.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780745976822", "isbn": "9780745976822", "title": "Ali the Tales from the Ark", "author": "Michael Morpurgo", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Hard Cover", "price": "$45.00", "cost": 12.0, "synopsis": "Whimsical perspectives of Noah's ark voyage told through the voices of the diverse animals aboard.", "imageUrl": "https://i.ibb.co/Ng1gxF2w/Ali-the-Tales-from-the-Ark.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780062345219", "isbn": "9780062345219", "title": "Four", "author": "Veronica Roth", "genre": "Dystopian Sci-Fi", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Hard Cover", "price": "$45.00", "cost": 12.0, "synopsis": "Four short stories recounting Tobias Eaton's transfer into Dauntless and his first encounter with Tris Prior.", "imageUrl": "https://i.ibb.co/nMmRLvhF/Four.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781932664089", "isbn": "9781932664089", "title": "Scott Pilgrim (Bk 1)", "author": "Bryan O'Malley", "genre": "Graphic Novel", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Slacker bassist Scott Pilgrim must defeat seven evil exes to date delivery girl Ramona Flowers.", "imageUrl": "https://covers.openlibrary.org/b/isbn/9781932664089-L.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9789801871927", "isbn": "9789801871927", "title": "De Dios Para Ti", "author": "Max Lucado", "genre": "Christian", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$45.00", "cost": 12.0, "synopsis": "Inspiring Spanish devotional readings offering God's personal promises of comfort, grace, and hope.", "imageUrl": "https://i.ibb.co/KpWw0NRM/De-Dios-Para-Ti.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780830790197", "isbn": "9780830790197", "title": "New Testament The Picture Bible", "author": "Iva Hoth", "genre": "Christian", "age": "Kids", "ageCategory": "Kids", "format": "Paper Back", "price": "$35.00", "cost": 12.0, "synopsis": "Comic-strip illustrated New Testament presenting the Gospel message and early church in dynamic panels.", "imageUrl": "https://i.ibb.co/dwJxyTPV/bible.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781538767986", "isbn": "9781538767986", "title": "The Trouble Up North", "author": "K.L. Montgomery", "genre": "Mystery / Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "An investigator uncovers criminal operations and deadly secrets hidden in a freezing northern town.", "imageUrl": "https://i.ibb.co/Z1vGCD10/The-Trouble-Up-North.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781797228617", "isbn": "9781797228617", "title": "The Callers", "author": "Kiah Thomas", "genre": "Social Science / Psychology", "age": "Middle Grade", "ageCategory": "Middle Grade", "format": "Paper Back", "price": "$35.00", "cost": 12.0, "synopsis": "Examines the hidden factors, cultural legacies, and 10,000-hour practice rules behind extreme success.", "imageUrl": "https://i.ibb.co/5hLPr3nb/gallers.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781990252358", "isbn": "9781990252358", "title": "Milo The Knight", "author": "Matt Dinniman", "genre": "Children's Fiction", "age": "Kids", "ageCategory": "Kids", "format": "Hard Cover", "price": "$40.00", "cost": 12.0, "synopsis": "A courageous young knight embarks on a quest to defend kingdom outposts from mythical perils.", "imageUrl": "https://i.ibb.co/4R2dYt4Y/Milo-The-Knight.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781784987572", "isbn": "9781784987572", "title": "How Can I Pray", "author": "David Watson", "genre": "Christian", "age": "Kids", "ageCategory": "Kids", "format": "Paper Back", "price": "$25.00", "cost": 12.0, "synopsis": "An accessible, practical guide designed to help readers develop a consistent and meaningful prayer life.", "imageUrl": "https://i.ibb.co/Hw75ycT/How-Can-I-Pray.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "CAT-148", "isbn": "", "title": "2027 Floral Blue Planner", "author": "", "genre": "Planner", "age": "Adult", "ageCategory": "Adult", "format": "Spiral Bound", "price": "$55.00", "cost": 12.0, "synopsis": "This 12-month 2027 planner spans January 2027 to December 2027, with a generous 11\" × 9\" size to give you plenty of room for daily, weekly, and monthly scheduling.", "imageUrl": "https://i.ibb.co/nMZ1JcMz/blue-planner.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "CAT-149", "isbn": "", "title": "2027 Believe In Yourself Planner", "author": "", "genre": "Planner", "age": "Adult", "ageCategory": "Adult", "format": "Spiral Bound", "price": "$50.00", "cost": 12.0, "synopsis": "2027 Planner Weekly and Monthly - This planner 2027 features 12 months of weekly and monthly pages and holidays marked.", "imageUrl": "https://i.ibb.co/Jjd72L5R/Believe-Planner.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9798881604165", "isbn": "9798881604165", "title": "Fourth Wing Official Coloring Book", "author": "Rebecca Yarros", "genre": "Coloring Book", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "Featuring gorgeous illustrations created by fan artists from around the world, Fourth Wing: The Official Coloring Book brings to life the fierce dragons, high-stakes romance, and breathtaking scenes that have captivated millions.", "imageUrl": "https://covers.openlibrary.org/b/isbn/9798881604165-L.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9798987054666", "isbn": "9798987054666", "title": "Silver Foxed", "author": "Kayla Grosse", "genre": "Erotica / Comedy", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "Silver Foxed is a standalone, dad’s best friend, age gap novella, with a plus-size female main character. Guaranteed to bring you ALL the spice.", "imageUrl": "https://covers.openlibrary.org/b/isbn/9798987054666-L.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781250886088", "isbn": "9781250886088", "title": "Legends and Lattes", "author": "Travis Baldree", "genre": "Action / Fantasy", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "The battle-weary orc aims to start fresh, opening the first ever coffee shop in the city of Thune. But old and new rivals stand in the way of success; not to mention the fact that no one has the faintest idea what coffee actually is.", "imageUrl": "https://covers.openlibrary.org/b/isbn/9781250886088-L.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9798217036370", "isbn": "9798217036370", "title": "How Lucky Am I", "author": "Christian Watson", "genre": "Self-Help", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$80.00", "cost": 12.0, "synopsis": "Join beloved Mr Skelly, a gentle skeleton wandering across lush landscapes and treacherous terrains, through times of joy, loss, grief and love, to find his family and, ultimately, a safe home.", "imageUrl": "https://covers.openlibrary.org/b/isbn/9798217036370-L.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780593983300", "isbn": "9780593983300", "title": "The Geomagician", "author": "Jennifer Mandula", "genre": "Sci-Fi / Paranormal Fantasy", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$65.00", "cost": 12.0, "synopsis": "When a Victorian fossil hunter discovers a baby pterodactyl, she vows to protect him, with the help of a fellow scholar—her former fiancé—in this enchanting and transporting historical fantasy.", "imageUrl": "https://covers.openlibrary.org/b/isbn/9780593983300-L.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781639102709", "isbn": "9781639102709", "title": "A Botanist's Guide to Parties and Poisons", "author": "Kate Khavari", "genre": "Mystery / Thriller", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "Newly minted research assistant Saffron Everleigh is determined to blaze a new trail at the University College London, but with her colleagues’ beliefs about women’s academic inabilities and not so subtle hints that her deceased father’s reputation paved her way into the botany department, she feels stymied at every turn.", "imageUrl": "https://covers.openlibrary.org/b/isbn/9781639102709-L.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781368051477", "isbn": "9781368051477", "title": "Percy Jackson & The Olympians: The Lightning Thief", "author": "Rick Riordan", "genre": "Greek Myths", "age": "Kids", "ageCategory": "Kids", "format": "Paper Back", "price": "$40.00", "cost": 12.0, "synopsis": "Percy Jackson is about to be kicked out of boarding school again. He can't seem to stay out of trouble. Is he supposed to stand by while a bully picks on his scrawny best friend? Or not defend himself when his teacher turns into a monster and tries to kill him?", "imageUrl": "https://covers.openlibrary.org/b/isbn/9781368051477-L.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9798311636346", "isbn": "9798311636346", "title": "Self-Love Workbook for Women", "author": "Mercy Thomas", "genre": "Self-Help", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "Discover How to Overcome Self-Doubt, Improve Self-Worth and Build Self-Compassion", "imageUrl": "https://covers.openlibrary.org/b/isbn/9798311636346-L.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781250398567", "isbn": "9781250398567", "title": "Fabulous Bodies", "author": "Chuck Tingle", "genre": "Horror / Dark Fantasy", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$80.00", "cost": 12.0, "synopsis": "An aspiring fashion influencer by day, Poppy moonlights as a grave robber to make ends meet, wheeling and dealing dead bodies across Palm Springs.", "imageUrl": "https://covers.openlibrary.org/b/isbn/9781250398567-L.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781496752895", "isbn": "9781496752895", "title": "Her Soul to Take", "author": "Harley Laroux", "genre": "Paranormal / Erotica", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "When ghosthunter Rae moves back to rugged Washington state, she doesn’t bargain for a titillating fork-tongued demon and a ritualistic monster cult…", "imageUrl": "https://covers.openlibrary.org/b/isbn/9781496752895-L.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781496755544", "isbn": "9781496755544", "title": "Her Soul to Take: Deluxe Special Edition", "author": "Harley Laroux", "genre": "Paranormal / Erotica", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$70.00", "cost": 12.0, "synopsis": "When ghosthunter Rae moves back to rugged Washington state, she doesn’t bargain for a titillating fork-tongued demon and a ritualistic monster cult…", "imageUrl": "https://covers.openlibrary.org/b/isbn/9781496755544-L.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9798991592222", "isbn": "9798991592222", "title": "Grim (The Lost Souls Chronicles)", "author": "DJ Krimmer", "genre": "Gothic Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$60.00", "cost": 12.0, "synopsis": "Grim is a darkly funny, wickedly romantic tale of life, death, and a love that refuses to rest in peace.", "imageUrl": "https://covers.openlibrary.org/b/isbn/9798991592222-L.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781401971366", "isbn": "9781401971366", "title": "The Let Them Theory", "author": "Mel Robbins", "genre": "Self-Help", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$70.00", "cost": 12.0, "synopsis": "If you've ever felt stuck, overwhelmed, or frustrated with where you are, the problem isn't you. The problem is the power you give to other people. Let Them Theory puts the power to create a life you love back in your hands—and this book will show you exactly how to do it.", "imageUrl": "https://covers.openlibrary.org/b/isbn/9781401971366-L.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9780399155345", "isbn": "9780399155345", "title": "The Help", "author": "Kathryn Stockett", "genre": "Historical Fiction", "age": "Adult", "ageCategory": "Adult", "format": "Hard Cover", "price": "$65.00", "cost": 12.0, "synopsis": "Three women in 1960s Mississippi cross racial lines to write a tell-all book about working for wealthy families.", "imageUrl": "https://i.ibb.co/5XQt5fXq/The-Help.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781917910095", "isbn": "9781917910095", "title": "The Suffering", "author": "David Sodergren", "genre": "Horror / Supernatural", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "A gripping tale of love, death, and total bodily destruction, The Suffering is a new nightmare of escalating dread", "imageUrl": "https://covers.openlibrary.org/b/isbn/9781917910095-L.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9798800159837", "isbn": "9798800159837", "title": "The Haar", "author": "David Sodergren", "genre": "Horror / Supernatural", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$55.00", "cost": 12.0, "synopsis": "Romantic and deranged, THE HAAR is a gore-soaked folk horror fairy tale", "imageUrl": "https://covers.openlibrary.org/b/isbn/9798800159837-L.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781250895646", "isbn": "9781250895646", "title": "Don't Let The Forest In (Deluxe Edition)", "author": "CG Drews", "genre": "Horror / Monsters", "age": "Young Adult", "ageCategory": "Young Adult", "format": "Paper Back", "price": "$45.00", "cost": 12.0, "synopsis": "Desperate to figure out what's wrong with his friend, Andrew follows Thomas into the off-limits forest one night and catches him fighting a nightmarish monster", "imageUrl": "https://covers.openlibrary.org/b/isbn/9781250895646-L.jpg", "stock": 1, "published": true, "location": "Library", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}, {"id": "ISBN-9781640635333", "isbn": "9781640635333", "title": "The Last Letter", "author": "Rebecca Yarros", "genre": "Family Life / Romance", "age": "Adult", "ageCategory": "Adult", "format": "Paper Back", "price": "$50.00", "cost": 12.0, "synopsis": "The Last Letter is a haunting, heartbreaking and ultimately inspirational love story.", "imageUrl": "https://covers.openlibrary.org/b/isbn/9781640635333-L.jpg", "stock": 1, "published": true, "location": "Bookstore", "isPreOrder": false, "isService": false, "isNewArrival": false, "available": true}],
 
       posCart: [],
       sales: [],
@@ -4936,6 +5156,7 @@
     }
 
     function switchViewMode(mode) {
+      if (mode === 'storefront' && typeof syncStorefrontFromCatalog === 'function') syncStorefrontFromCatalog();
       currentViewMode = mode;
       const opsContainer = document.getElementById('opsHubContainer');
       const storeContainer = document.getElementById('storefrontContainer');
@@ -5002,7 +5223,8 @@
       if (b) b.textContent = c.body || OWL_COPY_DEFAULTS.body;
       if (p && Array.isArray(c.perks)) {
         p.innerHTML = c.perks.filter(Boolean).map(function (x) {
-          return '<span>✓ ' + String(x).replace(/^✓\s*/, '') + '</span>';
+          var t = String(x).replace(/^✓\s*/, '');
+          return '<div style="background:#FAF4E5;border:1px solid #E8DCC5;border-radius:12px;padding:10px 12px;font-size:12px;color:#3A1F10;font-weight:600;">' + t + '</div>';
         }).join('');
       }
     }
@@ -5182,6 +5404,8 @@
       }
       closeModal('importStockModal');
       if (typeof renderInventoryTab === 'function') renderInventoryTab();
+      if (typeof syncLibraryBooksFromCatalog === 'function') syncLibraryBooksFromCatalog();
+      if (typeof syncStorefrontFromCatalog === 'function') syncStorefrontFromCatalog();
       if (typeof renderOwlPublicShelves === 'function') renderOwlPublicShelves();
       if (typeof renderShelves === 'function') renderShelves();
       if (typeof saveAppState === 'function') saveAppState(true);
@@ -5367,7 +5591,7 @@
         library: 'hdrNavLibrary'
       };
       const activeHdrId = hdrMap[tabName] || hdrMap[currentActiveTab] || 'hdrNavSales';
-      ['hdrNavSales', 'hdrNavOrders', 'hdrNavStorefront', 'hdrNavOwl', 'hdrNavTraining', 'hdrNavWebsite', 'hdrNavLibrary'].forEach(id => {
+      ['hdrNavSales', 'hdrNavOrders', 'hdrNavStorefront', 'hdrNavOwl', 'hdrNavTraining', 'hdrNavWebsite'].forEach(id => {
         const btn = document.getElementById(id);
         if (!btn) return;
         if (id === activeHdrId) {
@@ -7589,7 +7813,7 @@
         } else {
           bucketPayMonth(s.paymentMethod, s.amountPaid, s.bankAccount, b);
         }
-        let saleBook = 0, saleSvc = 0;
+        let saleBook = 0, saleSvc = 0, saleMem = 0;
         (s.items || []).forEach(it => {
           const cat = (state.catalog || []).find(c =>
             c.id === it.id ||
@@ -7597,7 +7821,9 @@
           );
           const line = (Number(it.unitPrice) || 0) * (it.qty || 1);
           if (cat && cat.isService) {
-            saleSvc += line;
+            const g = ((cat.genre || '') + ' ' + (cat.title || '') + ' ' + (it.title || '')).toLowerCase();
+            if (g.includes('member') || cat.id === 'SVC-MEMBER') saleMem += line;
+            else saleSvc += line;
             return;
           }
           saleBook += line;
@@ -7607,6 +7833,7 @@
         if (!(s.items || []).length) saleBook = Number(s.subtotal) || 0;
         b.bookGross += saleBook;
         b.serviceGross += saleSvc;
+        b.membershipGross = (b.membershipGross || 0) + saleMem;
       });
 
       (state.preOrders || []).forEach(p => {
@@ -7649,6 +7876,7 @@
         if (s.includes('bbl')) return 'bbl';
         if (s.includes('customer deposit')) return 'deposits';
         if (s.includes('book sales')) return 'bookGross';
+        if (s.includes('sales (library)') || s.includes('library membership') || s.includes('membership')) return 'membershipGross';
         if (s.includes('other sales')) return 'serviceGross';
         if (s.includes('gst')) return 'gstAdj';
         if (s.includes('cogs')) return 'cogs';
@@ -7757,8 +7985,10 @@
         { key: 'abl', label: 'ABL (bank)', side: 'bank' },
         { key: 'bbl', label: 'BBL (bank)', side: 'bank' },
         { key: 'bookGross', label: 'Book sales (incl. GST)', side: 'income' },
+        { key: 'membershipGross', label: 'Sales (Library) membership (incl. GST)', side: 'income' },
         { key: 'serviceGross', label: 'Other sales (incl. GST)', side: 'income' },
         { key: 'bookSalesEx', label: 'Book sales (excl. GST)', side: 'income' },
+        { key: 'membershipSalesEx', label: 'Sales (Library) membership (excl. GST)', side: 'income' },
         { key: 'serviceSalesEx', label: 'Other sales (excl. GST)', side: 'income' },
         { key: 'gst', label: 'GST Payable', side: 'liability' },
         { key: 'deposits', label: 'Customer Deposits (new)', side: 'liability' },
@@ -7801,6 +8031,8 @@
       if (!b) return 0;
       if (key === 'bookSalesEx') return (b.bookGross || 0) / 1.125;
       if (key === 'serviceSalesEx') return (b.serviceGross || 0) / 1.125;
+      if (key === 'membershipSalesEx') return (b.membershipGross || 0) / 1.125;
+      if (key === 'membershipGross') return b.membershipGross || 0;
       if (key === 'salesEx') return ((b.bookGross || 0) + (b.serviceGross || 0) || (b.gross || 0)) / 1.125;
       if (key === 'gst') {
         const g = (b.bookGross || 0) + (b.serviceGross || 0) || (b.gross || 0);
@@ -7824,7 +8056,7 @@
       </div>`;
 
       const isBank = ['cash','abl','bbl'].includes(key);
-      const isSales = ['gross','bookGross','serviceGross','bookSalesEx','serviceSalesEx','salesEx','gst'].includes(key);
+      const isSales = ['gross','bookGross','serviceGross','membershipGross','bookSalesEx','serviceSalesEx','membershipSalesEx','salesEx','gst'].includes(key);
       const isDeposit = key === 'deposits' || key === 'depositsApplied';
       const isRefund = key === 'refunds';
       const isCogs = key === 'cogs' || key === 'inventory';
@@ -9496,6 +9728,102 @@
       }).join('');
     }
 
+
+    function closeOwlBookDetail() {
+      const m = document.getElementById('owlBookDetailModal');
+      if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
+    }
+    window.closeOwlBookDetail = closeOwlBookDetail;
+
+    function openSynopsisFromCatalogId(id) {
+      try {
+        const book = (typeof state !== 'undefined' && state.catalog)
+          ? state.catalog.find(c => c.id === id)
+          : null;
+        if (!book) {
+          alert('Book not found.');
+          return;
+        }
+        const modal = document.getElementById('owlBookDetailModal');
+        if (!modal) {
+          // fallback storefront modal
+          if (typeof openSynopsisModal === 'function') { openSynopsisModal(book); return; }
+          alert((book.title || '') + '\n\n' + (book.synopsis || 'No synopsis.'));
+          return;
+        }
+        const cover = document.getElementById('owlDetailCover');
+        const title = document.getElementById('owlDetailTitle');
+        const author = document.getElementById('owlDetailAuthor');
+        const genre = document.getElementById('owlDetailGenre');
+        const format = document.getElementById('owlDetailFormat');
+        const syn = document.getElementById('owlDetailSynopsis');
+        const wa = document.getElementById('owlDetailWa');
+        if (cover) {
+          cover.src = (typeof optimizeImageUrl === 'function' ? optimizeImageUrl(book.imageUrl || '', 400) : (book.imageUrl || ''));
+          cover.setAttribute('data-original-src', book.imageUrl || '');
+        }
+        if (title) title.textContent = book.title || '';
+        if (author) author.textContent = book.author ? ('by ' + book.author) : '';
+        if (genre) genre.textContent = book.genre || 'General';
+        if (format) format.textContent = book.format || '';
+        if (syn) syn.textContent = book.synopsis || 'No synopsis provided.';
+        if (wa) {
+          const msg = encodeURIComponent("Hi Los Bookies, I'd like to reserve \"" + (book.title || '') + "\" from Orange Walk Library.");
+          wa.href = 'https://wa.me/5016034507?text=' + msg;
+        }
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      } catch (err) {
+        console.error(err);
+        alert('Could not open book details.');
+      }
+    }
+    window.openSynopsisFromCatalogId = openSynopsisFromCatalogId;
+
+    
+    function syncStorefrontFromCatalog() {
+      if (typeof currentCatalog === 'undefined') return;
+      // Bookstore shelves: published bookstore stock (or any with stock > 0 at Bookstore)
+      currentCatalog = (state.catalog || []).filter(c =>
+        !c.isService &&
+        (c.location || 'Bookstore') === 'Bookstore' &&
+        (c.published !== false)
+      ).map(c => ({
+        isbn: c.isbn || '',
+        title: c.title,
+        author: c.author || '',
+        genre: c.genre || 'General',
+        ageCategory: c.ageCategory || c.age || 'Adult',
+        format: c.format || 'Paperback',
+        price: c.price || '$0.00',
+        synopsis: c.synopsis || '',
+        imageUrl: c.imageUrl || '',
+        isNewArrival: !!c.isNewArrival,
+        isPreOrder: !!c.isPreOrder || ((c.stock || 0) <= 0)
+      }));
+      if (typeof renderShelves === 'function') renderShelves();
+    }
+
+    function syncLibraryBooksFromCatalog() {
+      const lib = (state.catalog || []).filter(c =>
+        !c.isService && ((c.location || '') === 'Library' || (c.location || '') === 'OWL')
+      );
+      libraryBooks = lib.map(c => ({
+        id: c.id,
+        title: c.title,
+        author: c.author || '',
+        available: (c.available !== false) && ((c.stock == null) || c.stock > 0),
+        isbn: c.isbn || '',
+        stock: c.stock
+      }));
+      // If a rental is active for a book, mark unavailable
+      (rentalsList || []).forEach(r => {
+        if (r.status === 'Returned' || r.status === 'Cancelled') return;
+        const b = libraryBooks.find(x => x.id === r.bookId || x.title === r.bookTitle);
+        if (b) b.available = false;
+      });
+    }
+
     function renderOwlPublicShelves() {
       const host = document.getElementById('owlPublicShelvesHost');
       if (!host) return;
@@ -9551,28 +9879,29 @@
           const wa = 'https://wa.me/5016034507?text=' + msg;
           const author = b.author || 'Los Bookies';
           const cover = b.imageUrl || 'https://placehold.co/400x600/011d42/EDB926?text=Cover';
-          const safeTitle = String(b.title || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-          const safeSyn = String(b.synopsis || 'No synopsis.').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, ' ');
+          const bid = String(b.id || '').replace(/'/g, "\\'");
           return (
-            '<div class="owl-shelf-card" style="width:200px;flex:0 0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #E8DCC5;box-shadow:0 6px 18px rgba(45,25,15,0.08);display:flex;flex-direction:column;">' +
-              '<div style="background:#2B170B;padding:10px 10px 0;display:flex;justify-content:center;">' +
+            '<div style="flex:0 0 200px;max-width:200px;background:#FFFDF9;border:1px solid #E8DCC5;border-radius:16px;overflow:hidden;box-shadow:0 2px 8px rgba(45,25,15,0.08);display:flex;flex-direction:column;">' +
+              '<div style="background:#2B170B;padding:10px 10px 0;display:flex;justify-content:center;cursor:pointer;" onclick="openSynopsisFromCatalogId(\'' + bid + '\')">' +
                 '<div style="width:140px;height:190px;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.35);">' +
-                  '<img src="' + cover + '" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.src=\'https://placehold.co/400x600/011d42/EDB926?text=Cover\'">' +
+                  '<img src="' + (typeof optimizeImageUrl==='function'?optimizeImageUrl(cover,400):cover) + '" data-original-src="' + cover + '" alt="" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover;" onerror="onImgErr(this, \'Cover\')">' +
                 '</div>' +
               '</div>' +
               '<div style="padding:12px 14px 14px;display:flex;flex-direction:column;gap:8px;flex:1;background:#fff;">' +
                 '<div>' +
-                  '<div style="font-weight:800;font-size:14px;color:#2B170B;line-height:1.25;">' + (b.title || '') + '</div>' +
-                  '<div style="font-size:12px;color:#7A5B45;font-style:italic;margin-top:2px;">' + author + '</div>' +
+                  '<div style="font-weight:800;font-size:14px;color:#2B170B;line-height:1.25;cursor:pointer;" onclick="openSynopsisFromCatalogId(\'' + bid + '\')">' + (b.title || '') + '</div>' +
+                  '<div style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:4px;">' +
+                    '<div style="font-size:12px;color:#7A5B45;font-style:italic;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + author + '</div>' +
+                    '<button type="button" onclick="openSynopsisFromCatalogId(\'' + bid + '\')" style="flex-shrink:0;font-size:12px;font-weight:700;color:#234E35;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;gap:2px;padding:0;">View <span aria-hidden="true">→</span></button>' +
+                  '</div>' +
                 '</div>' +
                 '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto;padding-top:8px;border-top:1px solid #F0E6D4;">' +
                   (avail
-                    ? '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:#047857;background:#ECFDF5;border:1px solid #A7F3D0;padding:3px 10px;border-radius:999px;">✓ Available</span>'
-                    : '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:#B45309;background:#FFFBEB;border:1px solid #FCD34D;padding:3px 10px;border-radius:999px;">On loan</span>') +
-                  '<div style="display:flex;align-items:center;gap:6px;">' +
-                    (avail ? ('<a href="' + wa + '" target="_blank" rel="noopener noreferrer" title="Reserve on WhatsApp" style="width:32px;height:32px;border-radius:50%;background:#25D366;color:#fff;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;box-shadow:0 2px 6px rgba(37,211,102,0.35);"><i class="fa-brands fa-whatsapp" style="font-size:16px;"></i></a>') : '') +
-                    '<button type="button" onclick="alert(\'' + safeTitle + '\\n\\n' + safeSyn + '\')" style="font-size:12px;font-weight:700;color:#234E35;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;gap:4px;">View →</button>' +
-                  '</div>' +
+                    ? '<span title="Available" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#ECFDF5;border:1px solid #A7F3D0;color:#047857;"><i class="fa-solid fa-book-open" style="font-size:12px;"></i></span>'
+                    : '<span title="On loan" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#FFFBEB;border:1px solid #FCD34D;color:#B45309;"><i class="fa-solid fa-book" style="font-size:12px;"></i></span>') +
+                  (avail
+                    ? ('<a href="' + wa + '" target="_blank" rel="noopener noreferrer" title="Reserve on WhatsApp" style="display:inline-flex;align-items:center;gap:6px;background:#25D366;color:#fff;font-weight:700;font-size:12px;padding:6px 12px;border-radius:999px;text-decoration:none;box-shadow:0 2px 6px rgba(37,211,102,0.35);"><i class="fa-brands fa-whatsapp" style="font-size:15px;"></i> Reserve</a>')
+                    : '<span style="font-size:11px;font-weight:600;color:#9E8773;">On loan</span>') +
                 '</div>' +
               '</div>' +
             '</div>'
@@ -10029,7 +10358,7 @@
         }
       }
 
-      let bookGross = 0, serviceGross = 0;
+      let bookGross = 0, serviceGross = 0, membershipGross = 0;
       (state.sales || []).forEach(s => {
         if (s.date !== today || s.tillPosted) return;
         salesGross += (s.subtotal || 0);
@@ -10042,7 +10371,7 @@
         } else {
           bucketPay(s.paymentMethod, s.amountPaid, s.bankAccount);
         }
-        let saleBook = 0, saleSvc = 0;
+        let saleBook = 0, saleSvc = 0, saleMem = 0;
         (s.items || []).forEach(it => {
           const cat = state.catalog.find(c =>
             c.id === it.id ||
@@ -10050,17 +10379,19 @@
           );
           const line = (Number(it.unitPrice) || 0) * (it.qty || 1);
           if (cat && cat.isService) {
-            saleSvc += line;
+            const g = ((cat.genre || '') + ' ' + (cat.title || '') + ' ' + (it.title || '')).toLowerCase();
+            if (g.includes('member') || cat.id === 'SVC-MEMBER') saleMem += line;
+            else saleSvc += line;
             return;
           }
           saleBook += line;
           const unitCost = cat && typeof cat.cost === 'number' ? cat.cost : 0;
           cogs += unitCost * (it.qty || 1);
         });
-        // If no item breakdown, treat whole sale as books
         if (!(s.items || []).length) saleBook = Number(s.subtotal) || 0;
         bookGross += saleBook;
         serviceGross += saleSvc;
+        membershipGross += saleMem;
       });
 
       (state.preOrders || []).forEach(p => {
@@ -10084,16 +10415,16 @@
 
       const bookSalesEx = bookGross / 1.125;
       const serviceSalesEx = serviceGross / 1.125;
-      const salesEx = bookSalesEx + serviceSalesEx;
+      const membershipSalesEx = membershipGross / 1.125;
+      const salesEx = bookSalesEx + serviceSalesEx + membershipSalesEx;
       const gst = salesGross - salesEx;
       const invCredit = cogs;
       const moneyIn = cash + abl + bbl;
-      // Debits: cash/banks + COGS + deposits applied (liability down)
-      // Credits: book sales + other sales + gst + new deposits + inventory
       const debitTot = moneyIn + cogs + depositsApplied;
-      const creditTot = bookSalesEx + serviceSalesEx + gst + deposits + invCredit;
+      const creditTot = bookSalesEx + serviceSalesEx + membershipSalesEx + gst + deposits + invCredit;
       const el = (id, v) => { const n = document.getElementById(id); if (n) n.innerText = 'BZ$' + v.toFixed(2); };
       el('posTillSalesEx', bookSalesEx);
+      el('posTillMembershipSalesEx', membershipSalesEx);
       el('posTillServiceSalesEx', serviceSalesEx);
       el('posTillGst', gst);
       el('posTillDeposits', deposits);
@@ -10116,7 +10447,7 @@
           bal.className = ok ? 'text-[10px] font-bold text-emerald-800' : 'text-[10px] font-bold text-rose-700';
         }
       }
-      state._tillSnapshot = { today, cash, abl, bbl, salesGross, salesEx, bookSalesEx, serviceSalesEx, bookGross, serviceGross, gst, deposits, depositsApplied, cogs, invCredit, debitTot, creditTot };
+      state._tillSnapshot = { today, cash, abl, bbl, salesGross, salesEx, bookSalesEx, serviceSalesEx, membershipSalesEx, bookGross, serviceGross, membershipGross, gst, deposits, depositsApplied, cogs, invCredit, debitTot, creditTot };
     }
 
     function confirmPosDayPosting() {
@@ -10662,9 +10993,36 @@
         payments: finalPaid > 0 ? [{ date: today, amount: finalPaid, method: methodLabel, bankAccount }] : []
       });
 
+
+      // Register library annual memberships sold on Register → OWL active member list
+      (saleItems || []).forEach(function (it) {
+        const cat = (state.catalog || []).find(c => c.id === it.id || (c.title || '').toLowerCase() === (it.title || '').toLowerCase());
+        const title = (it.title || (cat && cat.title) || '');
+        const genre = (cat && cat.genre) || '';
+        const isMem = (cat && cat.id === 'SVC-MEMBER')
+          || /membership/i.test(title)
+          || /membership/i.test(genre)
+          || (/member/i.test(title) && /75|annual/i.test(title));
+        if (!isMem) return;
+        let memEmail = (document.getElementById('posCustomerEmail')?.value || '').trim();
+        if (!memEmail) {
+          memEmail = prompt('Member email for OWL loans (required):', '') || '';
+        }
+        const memName = (customerName && customerName !== 'Walk-in') ? customerName : memEmail;
+        const regFn = window.registerAnnualMemberPayment || registerAnnualMemberPayment;
+        if (memEmail && typeof regFn === 'function') {
+          regFn(memEmail, today, memName);
+          showToast('Membership active for OWL: ' + memName + ' · ' + memEmail, 'success');
+        } else if (!memEmail) {
+          showToast('Membership sale saved, but enter Email on Register so they appear in OWL member search.', 'warning');
+        }
+      });
+
       clearPosCart();
       const posName = document.getElementById('posCustomerName');
       if (posName) posName.value = '';
+      const posEmail = document.getElementById('posCustomerEmail');
+      if (posEmail) posEmail.value = '';
       const tenderIn = document.getElementById('posAmountTendered');
       if (tenderIn) tenderIn.value = '';
       const depCb = document.getElementById('posApplyDepositCb');
@@ -11866,7 +12224,7 @@ All Fours | Hard Cover | 21.00 | 1`;
       }, 300);
     }
 
-    const STORAGE_KEY = 'losBookiesHub_v1';
+    const STORAGE_KEY = 'losBookiesHub_v2';
 
     // Sandbox-safe storage (no allow-same-origin → SecurityError on localStorage/sessionStorage)
     const _memLocal = {};
@@ -11903,6 +12261,7 @@ All Fours | Hard Cover | 21.00 | 1`;
           creditCardTxns: state.creditCardTxns,
           catalog: state.catalog,
           sales: state.sales || [],
+          annualMembers: state.annualMembers || {},
           confirmedJournals: state.confirmedJournals || [],
           bankDeposits: state.bankDeposits || [],
           tillPostedDate: state.tillPostedDate || null,
@@ -11926,9 +12285,12 @@ All Fours | Hard Cover | 21.00 | 1`;
         if (data.creditCardTxns) state.creditCardTxns = data.creditCardTxns;
         if (data.catalog) state.catalog = data.catalog;
         if (data.sales) state.sales = data.sales;
+        if (data.annualMembers) state.annualMembers = data.annualMembers;
         if (data.confirmedJournals) state.confirmedJournals = data.confirmedJournals;
         if (data.bankDeposits) state.bankDeposits = data.bankDeposits;
         if (data.tillPostedDate) state.tillPostedDate = data.tillPostedDate;
+        if (typeof syncLibraryBooksFromCatalog === 'function') syncLibraryBooksFromCatalog();
+      if (typeof syncStorefrontFromCatalog === 'function') syncStorefrontFromCatalog();
         return true;
       } catch (e) {
         return false;
@@ -11991,6 +12353,8 @@ All Fours | Hard Cover | 21.00 | 1`;
 
     window.addEventListener('DOMContentLoaded', () => {
       const loaded = loadAppState();
+      if (typeof syncLibraryBooksFromCatalog === 'function') syncLibraryBooksFromCatalog();
+      if (typeof syncStorefrontFromCatalog === 'function') syncStorefrontFromCatalog();
       switchTab('sales');
       renderPreOrdersTable();
       renderOrdersTable();
@@ -12030,24 +12394,35 @@ All Fours | Hard Cover | 21.00 | 1`;
         </div>
       </div>
       <div style="max-width:1120px;margin:0 auto;padding:24px 16px;display:flex;flex-direction:column;gap:20px;">
-        <div style="border-radius:24px;background:linear-gradient(135deg,#321708,#48240F,#251105);color:#FFF9EB;padding:28px 24px;border:1px solid #5C3218;">
-          <div id="owlHeroTitle" style="font-family:Cinzel,serif;font-weight:800;font-size:28px;color:#F8E8C8;line-height:1.2;">Borrow Stories, Classics &amp; New Worlds from Orange Walk</div>
-          <p id="owlHeroBody" style="margin:10px 0 0;font-size:14px;color:#E7D0B2;line-height:1.5;">Browse our community shelves curated by age groups. Reserve any available title via WhatsApp with zero account setup required.</p>
-          <div id="owlHeroPerks" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:14px;font-size:12px;font-weight:600;color:#EED8B5;">
-            <span>✓ Standard 14-Day Lending</span>
-            <span>✓ Instant WhatsApp Hold</span>
-            <span>✓ $75/yr Membership or $5 Deposit</span>
+        <div style="display:grid;gap:16px;">
+          <div style="border-radius:20px;overflow:hidden;border:1px solid #E8DCC5;background:#FFFDF9;">
+            <div style="padding:20px 20px 8px;display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:12px;">
+              <div style="max-width:640px;">
+                <div style="font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#9E8773;margin-bottom:6px;">Community library</div>
+                <div id="owlHeroTitle" style="font-family:Cinzel,serif;font-weight:800;font-size:24px;color:#2B170B;line-height:1.25;">Borrow stories from Orange Walk</div>
+                <p id="owlHeroBody" style="margin:8px 0 0;font-size:14px;color:#6B5344;line-height:1.55;">Browse by age group. Reserve on WhatsApp — no account needed.</p>
+              </div>
+              <a href="https://wa.me/5016034507?text=Hi%20Los%20Bookies%2C%20I%27d%20like%20to%20join%20the%20Orange%20Walk%20Library." target="_blank" rel="noopener noreferrer"
+                style="display:inline-flex;align-items:center;gap:8px;background:#234E35;color:#fff;font-weight:700;font-size:13px;padding:12px 16px;border-radius:12px;text-decoration:none;white-space:nowrap;">
+                <i class="fa-brands fa-whatsapp" style="font-size:16px;"></i> Join / ask us
+              </a>
+            </div>
+            <div id="owlHeroPerks" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;padding:12px 16px 16px;">
+              <div style="background:#FAF4E5;border:1px solid #E8DCC5;border-radius:12px;padding:10px 12px;font-size:12px;color:#3A1F10;font-weight:600;">14-day loans</div>
+              <div style="background:#FAF4E5;border:1px solid #E8DCC5;border-radius:12px;padding:10px 12px;font-size:12px;color:#3A1F10;font-weight:600;">WhatsApp hold</div>
+              <div style="background:#FAF4E5;border:1px solid #E8DCC5;border-radius:12px;padding:10px 12px;font-size:12px;color:#3A1F10;font-weight:600;">$75/yr or $5 deposit</div>
+            </div>
           </div>
-        </div>
-        <div style="background:#FFFDF8;border:1px solid #E8DCC5;border-radius:16px;padding:12px;display:flex;flex-wrap:wrap;gap:10px;">
-          <input type="text" id="owlPublicSearch" oninput="renderOwlPublicShelves()" placeholder="Search book title, author, or keyword..." style="flex:1;min-width:200px;padding:10px 14px;border:1px solid #DACBB0;border-radius:12px;font-size:14px;">
-          <select id="owlPublicAgeFilter" onchange="renderOwlPublicShelves()" style="padding:10px 14px;border:1px solid #DACBB0;border-radius:12px;font-size:14px;background:#fff;min-width:180px;">
-            <option value="">All Shelves (All Ages)</option>
-            <option value="Kids">Kids</option>
-            <option value="Middle Grade">Middle Grade</option>
-            <option value="Young Adult">Young Adult</option>
-            <option value="Adult">Adult</option>
-          </select>
+          <div style="background:#FFFDF8;border:1px solid #E8DCC5;border-radius:14px;padding:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+            <input type="text" id="owlPublicSearch" oninput="renderOwlPublicShelves()" placeholder="Search title or author…" style="flex:1;min-width:180px;padding:10px 14px;border:1px solid #DACBB0;border-radius:10px;font-size:14px;background:#fff;">
+            <select id="owlPublicAgeFilter" onchange="renderOwlPublicShelves()" style="padding:10px 12px;border:1px solid #DACBB0;border-radius:10px;font-size:13px;background:#fff;">
+              <option value="">All ages</option>
+              <option value="Kids">Kids</option>
+              <option value="Middle Grade">Middle Grade</option>
+              <option value="Young Adult">Young Adult</option>
+              <option value="Adult">Adult</option>
+            </select>
+          </div>
         </div>
         <div id="owlPublicShelvesHost">
           <div style="background:#FFFDF9;border:1px solid #E8DCC5;border-radius:16px;padding:28px;text-align:center;color:#7A5B45;">
@@ -12322,6 +12697,34 @@ All Fours | Hard Cover | 21.00 | 1`;
         <div class="flex gap-2">
           <button type="button" onclick="commitImportStock()" class="flex-1 bg-indigo-700 hover:bg-indigo-800 text-white font-bold py-2.5 rounded-xl">Import</button>
           <button type="button" onclick="closeModal('importStockModal')" class="px-4 py-2.5 rounded-xl border border-[#DACBB0]">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OWL / Library book detail (independent of storefront synopsis modal) -->
+  <div id="owlBookDetailModal" class="fixed inset-0 z-[99999] hidden items-center justify-center p-4" style="background:rgba(26,15,8,0.72);backdrop-filter:blur(6px);" onclick="if(event.target===this)closeOwlBookDetail()">
+    <div class="bg-[#FFFDF9] rounded-2xl max-w-md w-full overflow-hidden shadow-2xl border border-[#DACBB0] max-h-[90vh] overflow-y-auto" onclick="event.stopPropagation()">
+      <div class="relative bg-[#2B170B] p-4 flex gap-4 items-start">
+        <img id="owlDetailCover" src="" alt="" class="w-24 h-36 object-cover rounded-lg border border-[#7A4422] shrink-0" onerror="this.src='https://placehold.co/200x300/2B170B/F9E8B8?text=Cover'">
+        <div class="min-w-0 flex-1 text-[#F9E8B8] pt-1">
+          <h3 id="owlDetailTitle" class="font-bold text-lg leading-snug" style="font-family:Cinzel,serif;"></h3>
+          <p id="owlDetailAuthor" class="text-sm text-[#E7D0B2] mt-1 italic"></p>
+          <div class="flex flex-wrap gap-1.5 mt-2">
+            <span id="owlDetailGenre" class="text-[10px] font-bold uppercase tracking-wide bg-[#3A1F10] border border-[#7A4422] px-2 py-0.5 rounded-full"></span>
+            <span id="owlDetailFormat" class="text-[10px] font-bold uppercase tracking-wide bg-[#3A1F10] border border-[#7A4422] px-2 py-0.5 rounded-full"></span>
+          </div>
+        </div>
+        <button type="button" onclick="closeOwlBookDetail()" class="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/10 text-[#F9E8B8] hover:bg-white/20 text-lg leading-none">&times;</button>
+      </div>
+      <div class="p-4 space-y-3">
+        <div>
+          <div class="text-[10px] font-bold uppercase tracking-wide text-[#9E8773] mb-1">Synopsis</div>
+          <p id="owlDetailSynopsis" class="text-sm text-[#3A1F10] leading-relaxed"></p>
+        </div>
+        <div class="flex gap-2 pt-1">
+          <a id="owlDetailWa" href="#" target="_blank" rel="noopener noreferrer" class="flex-1 text-center bg-[#25D366] hover:bg-[#1ebe57] text-white font-bold text-sm py-2.5 rounded-xl">Reserve on WhatsApp</a>
+          <button type="button" onclick="closeOwlBookDetail()" class="px-4 py-2.5 rounded-xl border border-[#DACBB0] text-sm font-semibold text-[#5C3419]">Close</button>
         </div>
       </div>
     </div>
